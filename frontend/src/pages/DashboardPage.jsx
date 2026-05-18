@@ -26,9 +26,12 @@ import {
 import {
   fetchUserRooms,
   createRoom,
-  joinRoom,
+  fetchRoomById,
   deleteRoom,
   fetchMyRequests,
+  cancelJoinRequest,
+  createJoinRequest,
+  fetchRoomRequests,
 } from '../services/roomsApi';
 
 export default function DashboardPage() {
@@ -38,6 +41,7 @@ export default function DashboardPage() {
   const [recentRooms, setRecentRooms] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [showPending, setShowPending] = useState(false);
+  const [incomingRequests, setIncomingRequests] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Modal State
@@ -46,11 +50,19 @@ export default function DashboardPage() {
   const [roomInputValue, setRoomInputValue] = useState('');
   const [actionError, setActionError] = useState('');
 
-  useEffect(() => {
-  if (user?.id) {
+ useEffect(() => {
+
+  if (!user?.id) return;
+
+  loadRooms();
+
+  const interval = setInterval(() => {
     loadRooms();
     loadPendingRequests();
-  }
+  }, 3000);
+
+  return () => clearInterval(interval);
+
 }, [user?.id]);
 
   const loadRooms = async () => {
@@ -77,6 +89,24 @@ export default function DashboardPage() {
     }
   };
 
+  const loadIncomingRequests = async () => {
+
+  try {
+
+    const requests =
+      await fetchRoomRequests(user.id);
+
+    setIncomingRequests(requests);
+
+  } catch (err) {
+
+    console.error(
+      'Failed to load incoming requests:',
+      err.message
+    );
+  }
+};
+
   const openCreateModal = () => {
     setRoomInputValue('');
     setActionError('');
@@ -102,32 +132,117 @@ export default function DashboardPage() {
   };
 
   const handleDeleteRoom = async (roomId) => {
-    if (!window.confirm('Are you sure you want to delete this room?')) return;
-    try {
-      await deleteRoom(roomId, user.id);
-      setRecentRooms(prev => prev.filter(r => r.id !== roomId));
-    } catch (err) {
-      alert('Failed to delete room: ' + err.message);
-    }
-  };
+
+  try {
+
+    await deleteRoom(
+      roomId,
+      user.id
+    );
+
+    setRecentRooms(prev =>
+      prev.filter(
+        room => room.id !== roomId
+      )
+    );
+
+  } catch (err) {
+
+    console.error(err);
+
+    alert(
+      'Failed to delete room'
+    );
+  }
+};
 
   const handleJoinRoomSubmit = async (e) => {
-    e.preventDefault();
-    if (!roomInputValue?.trim()) return;
-    try {
-      setActionError('');
-      await joinRoom(user.id, roomInputValue);
-      window.location.href = `/editor/${roomInputValue}`;
-    } catch (err) {
-      setActionError('Failed to join room: ' + err.message);
+
+  e.preventDefault();
+
+  if (!roomInputValue?.trim()) return;
+
+  try {
+
+    setActionError('');
+
+    const roomId = roomInputValue
+      .trim()
+      .toLowerCase();
+
+    // verify room exists
+    const room =
+      await fetchRoomById(roomId);
+
+    // prevent duplicate requests
+    const alreadyRequested =
+      pendingRequests.some(
+        req => req.roomId === roomId
+      );
+
+    if (alreadyRequested) {
+
+      setActionError(
+        'Request already pending'
+      );
+
+      return;
     }
-  };
+
+    // create pending request
+    await createJoinRequest(
+      user,
+      room
+    );
+
+    setIsJoinModalOpen(false);
+
+    setRoomInputValue('');
+
+    loadPendingRequests();
+
+  } catch (err) {
+
+  console.error(err);
+
+  setActionError(
+    err?.message ||
+    err?.response?.data?.message ||
+    'Failed to send request'
+  );
+}
+}
 
   const handleCopyRoomLink = async (roomId) => {
     const link = `${window.location.origin}/editor/${roomId}`;
     await navigator.clipboard.writeText(link);
     alert('Room link copied!');
   };
+
+  const handleCancelRequest =
+      async (requestId) => {
+
+        try {
+
+          await cancelJoinRequest(
+            requestId
+          );
+
+          setPendingRequests(prev =>
+            prev.filter(
+              r => r.id !== requestId
+            )
+          );
+
+        } catch (err) {
+
+          console.error(err);
+
+          alert(
+            'Failed to cancel request'
+          );
+        }
+      };
 
   const stats = [
     {
@@ -196,7 +311,31 @@ export default function DashboardPage() {
 
               <span>Recent</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('pending')}
+              className={`
+                w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all
+                ${activeTab === 'pending'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                }
+              `}
+            >
+              <Users className="w-5 h-5" />
+
+              <span>Pending Requests</span>
+
+              {pendingRequests.length > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-xs min-w-[20px] h-5 px-1 rounded-full flex items-center justify-center">
+                  {pendingRequests.length}
+                </span>
+              )}
+            </button>
+
           </nav>
+
+          
 
           <div className="mt-auto flex flex-col gap-1 pb-2">
             <Link to="/profile">
@@ -348,21 +487,21 @@ export default function DashboardPage() {
 
             <div className="mb-6 grid grid-cols-1 xl:grid-cols-3 gap-6 items-center">
 
-            <div className="xl:col-span-2">
-              <h2 className="text-2xl font-bold text-white">
-                Recent Rooms
-              </h2>
-            </div>
+            <h2 className="text-2xl font-bold text-white">
+              {activeTab === 'pending'
+                ? 'Pending Requests'
+                : 'Recent Rooms'}
+            </h2>
 
-            <div className="flex justify-end">
+            {/* <div className="flex justify-end">
             <button
               onClick={() => setShowPending(!showPending)}
               className="inline-flex items-center justify-center gap-2 font-medium transition px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl"
             >
               Pending Requests
             </button>
-          </div>
-
+          </div> */}
+{/* 
           {showPending && (
             <div className="absolute top-20 right-0 w-80 bg-[#111827] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50">
 
@@ -396,87 +535,194 @@ export default function DashboardPage() {
               )}
 
             </div>
-          )}
+          )} */}
 
 
           </div>
-            <div className="mb-6">
 
-              <div className="grid gap-4">
-                {recentRooms.map((room) => (
-                  <Link
-                    key={room.id}
-                    to={`/editor/${room.id}`}
+        <div className="mb-6">
+
+          <div className="grid gap-4">
+
+            {activeTab === 'pending' ? (
+
+              pendingRequests.length === 0 ? (
+
+                <Card glass className="p-8 text-center">
+                  <p className="text-gray-400">
+                    No pending requests
+                  </p>
+                </Card>
+
+              ) : (
+
+                pendingRequests.map((req) => (
+
+                  <Card
+                    key={req.id}
+                    glass
+                    hover
+                    className="group"
                   >
-                    <Card glass hover className="group">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4 flex-1">
-                          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                            <Code2 className="w-6 h-6 text-white" />
-                          </div>
+                    <div className="flex items-center justify-between">
 
-                          <div className="flex-1">
-                            <h3 className="text-white text-lg mb-1">
-                              {room.name}
-                            </h3>
+                      <div className="flex items-center gap-4 flex-1">
 
-                            <div className="flex items-center gap-4 text-sm text-gray-400">
-                              <span className="flex items-center gap-1">
-                                <FolderCode className="w-4 h-4" />
-                                {room.language}
-                              </span>
-
-                              <span className="flex items-center gap-1">
-                                <Users className="w-4 h-4" />
-                                {room.members} members
-                              </span>
-
-                              <span className="flex items-center gap-1">
-                                <Clock className="w-4 h-4" />
-                                {room.lastActive}
-                              </span>
-                            </div>
-                          </div>
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
+                          <Code2 className="w-6 h-6 text-white" />
                         </div>
 
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="ghost"
-                            className="group-hover:bg-white/10"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              handleCopyRoomLink(room.link);
-                            }}
-                          >
-                            <Copy className="w-4 h-4" />
-                          </Button>
+                        <div className="flex-1">
 
-                          <Button
-                            variant="ghost"
-                            className="group-hover:bg-red-500/10 text-red-400"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              handleDeleteRoom(room.id);
-                            }}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          <h3 className="text-white text-lg mb-1">
+                            {req.roomName}
+                          </h3>
 
-                          <Button
-                            variant="ghost"
-                            className="group-hover:bg-white/10"
-                          >
-                            Open
-                          </Button>
+                          <div className="flex items-center gap-4 text-sm text-gray-400">
+
+                            <span className="flex items-center gap-1">
+                              <FolderCode className="w-4 h-4" />
+                              {req.roomLanguage || 'javascript'}
+                            </span>
+
+                            <span className="flex items-center gap-1">
+                              <Users className="w-4 h-4" />
+                              Host: {req.roomOwner || 'Unknown'}
+                            </span>
+
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-4 h-4" />
+                              Waiting Approval
+                            </span>
+
+                          </div>
+
                         </div>
+
                       </div>
-                    </Card>
-                  </Link>
-                ))}
-              </div>
-            </div>
-            
+
+                      <div className="flex items-center gap-2">
+
+                        <Button
+                          variant="ghost"
+                          className="bg-yellow-500/10 text-yellow-400 cursor-default"
+                        >
+                          Pending
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          className="group-hover:bg-red-500/10 text-red-400"
+                          onClick={() => handleCancelRequest(req.id)}
+                        >
+                          Cancel
+                        </Button>
+
+                      </div>
+
+                    </div>
+                  </Card>
+
+                ))
+
+              )
+
+            ) : (
+
+              recentRooms.map((room) => (
+
+                <Link
+                  key={room.id}
+                  to={`/editor/${room.id}`}
+                >
+
+                  <Card glass hover className="group">
+
+                    <div className="flex items-center justify-between">
+
+                      <div className="flex items-center gap-4 flex-1">
+
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                          <Code2 className="w-6 h-6 text-white" />
+                        </div>
+
+                        <div className="flex-1">
+
+                          <h3 className="text-white text-lg mb-1">
+                            {room.name}
+                          </h3>
+
+                          <div className="flex items-center gap-4 text-sm text-gray-400">
+
+                            <span className="flex items-center gap-1">
+                              <FolderCode className="w-4 h-4" />
+                              {room.language}
+                            </span>
+
+                            <span className="flex items-center gap-1">
+                              <Users className="w-4 h-4" />
+                              {room.members} members
+                            </span>
+
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-4 h-4" />
+                              {room.lastActive}
+                            </span>
+
+                          </div>
+
+                        </div>
+
+                      </div>
+
+                      <div className="flex items-center gap-2">
+
+                        <Button
+                          variant="ghost"
+                          className="group-hover:bg-white/10"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleCopyRoomLink(room.link);
+                          }}
+                        >
+                          <Copy className="w-4 h-4" />
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          className="group-hover:bg-red-500/10 text-red-400"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleDeleteRoom(room.id);
+                          }}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          className="group-hover:bg-white/10"
+                        >
+                          Open
+                        </Button>
+
+                      </div>
+
+                    </div>
+
+                  </Card>
+
+                </Link>
+
+              ))
+
+            )}
+
           </div>
+
+        </div>
+
+        </div>
         </main>
       </div>
 

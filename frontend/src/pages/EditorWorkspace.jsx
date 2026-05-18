@@ -34,6 +34,12 @@ import {
   updateFile,
 } from '@/services/filesApi';
 
+import {
+  fetchRoomRequests,
+  approveJoinRequest,
+  rejectJoinRequest,
+} from '@/services/roomsApi';
+
 // import { executeCode } from '@/services/pistonApi';
 
 import {
@@ -93,6 +99,7 @@ export default function EditorWorkspace() {
   const [isSyncing, setIsSyncing] = useState(true);
   const [showPending, setShowPending] = useState(false);
   const [pendingRequests, setPendingRequests] = useState([]);
+
 
   const editorRef = useRef(null);
   const bindingRef = useRef(null);
@@ -158,6 +165,23 @@ export default function EditorWorkspace() {
     };
   }, [roomId]);
 
+// refreshpedningrequests
+    useEffect(() => {
+
+      if (!user?.id) return;
+
+      loadPendingRequests();
+
+      const interval = setInterval(() => {
+
+        loadPendingRequests();
+
+      }, 3000);
+
+      return () => clearInterval(interval);
+
+    }, [user?.id]);
+
   // Awareness (Collaborators)
   useEffect(() => {
     if (!provider || !user) return;
@@ -192,6 +216,7 @@ export default function EditorWorkspace() {
     return () => provider.awareness.off('change', upd);
   }, [provider]);
 
+
   const bindEditor = useCallback((editor, monacoNs) => {
     if (!doc || !sources || !provider) return;
 
@@ -203,22 +228,63 @@ export default function EditorWorkspace() {
     const lang = langs.get(ACTIVE_FILENAME) || language;
 
     const uri = monacoNs.Uri.parse(`file:///${roomId}/${ACTIVE_FILENAME}`);
-    
-    // Dispose old model if it exists to prevent stale state
-    const existingModel = monacoNs.editor.getModel(uri);
-    if (existingModel) {
-      existingModel.dispose();
-    }
 
-    const model = monacoNs.editor.createModel(ytext.toString(), lang, uri);
-    
-    modelRef.current = model;
-    editor.setModel(model);
+    // monaco editor sync relies on the model URI to identify documents, so we create a unique URI for this room and file. This also allows Monaco to manage the editor state (like undo/redo) correctly across sessions.
+// let model = monacoNs.editor.getModel(uri);
 
-    const binding = new MonacoBinding(monacoNs, ytext, model, new Set([editor]), provider.awareness);
-    bindingRef.current = binding;
-    editorRef.current = editor;
-  }, [provider, langs, language, doc, roomId]);
+// if (!model) {
+//   model = monacoNs.editor.createModel('', lang, uri);
+// }
+
+// modelRef.current = model;
+
+// editor.setModel(model);
+// Dispose stale Monaco model
+const existingModel =
+  monacoNs.editor.getModel(uri);
+
+if (existingModel) {
+  existingModel.dispose();
+}
+
+// Create fresh synced model
+const model = monacoNs.editor.createModel(
+  ytext.toString(),
+  lang,
+  uri
+);
+
+modelRef.current = model;
+
+editor.setModel(model);
+
+// Clear stale diagnostics
+monacoNs.editor.setModelMarkers(
+  model,
+  'owner',
+  []
+);
+
+
+
+// const binding = new MonacoBinding(
+//   monacoNs,
+//   ytext,
+//   model,
+//   new Set([editor]),
+//   provider.awareness
+// );
+const binding = new MonacoBinding(
+  monacoNs,
+  ytext,
+  model,
+  new Set(),
+  provider.awareness
+);
+
+bindingRef.current = binding;
+editorRef.current = editor;
+  }, [doc, sources, provider, langs, language, roomId]);
 
 
   const handleLanguageSelect = (next) => {
@@ -346,8 +412,8 @@ export default function EditorWorkspace() {
         return;
       }
 
-      const content = doc.getText(ACTIVE_FILENAME).toString();
-
+      // const content = doc.getText(ACTIVE_FILENAME).toString();
+      const content = editorRef.current?.getValue() || '';
       if (!content.trim()) {
         setOutputErr('Code editor is empty');
         return;
@@ -366,6 +432,27 @@ export default function EditorWorkspace() {
       setRunning(false);
     }
   };
+
+  const loadPendingRequests =
+    async () => { 
+
+      if (!user?.id) return;
+
+      try {
+
+        const requests =
+          await fetchRoomRequests(user.id);
+
+        setPendingRequests(requests);
+
+      } catch (err) {
+
+        console.error(
+          'Failed to load requests:',
+          err
+        );
+      }
+    };
 
   const copyLink = async () => {
     await navigator.clipboard.writeText(window.location.href);
@@ -422,7 +509,7 @@ export default function EditorWorkspace() {
         </Button>
 
         {showPending && (
-          <div className="absolute top-14 left-0 w-80 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden z-50">
+          <div className="absolute top-14 left-0 w-70 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden z-50">
 
             <div className="px-4 py-3 border-b border-zinc-800">
               <h3 className="text-sm font-semibold text-white">
@@ -447,6 +534,58 @@ export default function EditorWorkspace() {
                   <p className="text-zinc-500 text-xs mt-1">
                     wants to join this room
                   </p>
+
+                 <div className="flex gap-2 mt-3">
+
+                  <button
+                    onClick={async () => {
+
+                      try {
+
+                        await approveJoinRequest(req);
+
+                        // instantly update UI
+                        setPendingRequests(prev =>
+                          prev.filter(
+                            r => r.id !== req.id
+                          )
+                        );
+
+                      } catch (err) {
+
+                        console.error(err);
+                      }
+                    }}
+                    className="px-3 py-1 text-xs rounded-lg bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    Accept
+                  </button>
+
+                  <button
+                    onClick={async () => {
+
+                      try {
+
+                        await rejectJoinRequest(req.id);
+
+                        // instantly update UI
+                        setPendingRequests(prev =>
+                          prev.filter(
+                            r => r.id !== req.id
+                          )
+                        );
+
+                      } catch (err) {
+
+                        console.error(err);
+                      }
+                    }}
+                    className="px-3 py-1 text-xs rounded-lg bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    Reject
+                  </button>
+
+                </div>
                 </div>
               ))
             )}
@@ -526,16 +665,6 @@ export default function EditorWorkspace() {
                 ))}
               </div>
             </div>
-
-            {/* <div className="p-4 border-t border-zinc-800">
-              <button 
-                onClick={() => signOut(() => window.location.href = '/')}
-                className="w-full flex items-center gap-2 p-2 text-zinc-500 hover:text-red-400 transition-colors text-sm"
-              >
-                <LogOut className="w-4 h-4" />
-                Sign Out
-              </button>
-            </div> */}
           </div>
         </Panel>
 

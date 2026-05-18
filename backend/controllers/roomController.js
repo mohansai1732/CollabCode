@@ -85,6 +85,47 @@ async function joinRoom(req, res, next) {
   }
 }
 
+async function getRoomById(req, res, next) {
+
+  try {
+
+    if (!db) {
+      return res.status(500).json({
+        message: 'Firebase not initialized'
+      });
+    }
+
+    const { roomId } = req.params;
+
+    if (!roomId) {
+      return res.status(400).json({
+        message: 'roomId required'
+      });
+    }
+
+    const roomDoc =
+      await db.collection('rooms')
+      .doc(roomId)
+      .get();
+
+    if (!roomDoc.exists) {
+      return res.status(404).json({
+        message: 'Room not found'
+      });
+    }
+
+    res.json({
+      room: {
+        id: roomDoc.id,
+        ...roomDoc.data()
+      }
+    });
+
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function deleteRoom(req, res, next) {
   try {
     const { roomId } = req.params;
@@ -134,4 +175,4 @@ async function deleteRoom(req, res, next) {
   }
 }
 
-module.exports = { getUserRooms, createRoom, joinRoom, deleteRoom };
+module.exports = { getUserRooms, createRoom, joinRoom, deleteRoom, getRoomById };
