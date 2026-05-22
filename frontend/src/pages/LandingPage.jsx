@@ -76,7 +76,7 @@ export default function LandingPage() {
             </div>
 
             <span className="text-xl text-white font-semibold">
-              CodeSync
+              CollabCode
             </span>
           </Link>
 
@@ -458,7 +458,7 @@ export default function LandingPage() {
                 </div>
 
                 <span className="font-semibold text-lg bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                  CodeSync
+                  CollabCode
                 </span>
 
               </div>
@@ -545,7 +545,7 @@ export default function LandingPage() {
 
           {/* Bottom */}
           <div className="mt-12 pt-8 border-t border-white/10 text-center text-sm text-gray-400">
-            © 2026 CodeSync. All rights reserved.
+            © 2026 CollabCode. All rights reserved.
           </div>
 
         </div>

@@ -4,6 +4,13 @@ async function getUserRooms(req, res, next) {
   try {
     if (!db) return res.status(500).json({ message: 'Firebase not initialized' });
     const { userId } = req.params;
+    const { userName } = req.query;
+
+    if (userName) {
+      await db.collection('users').doc(userId).set({
+        fullName: userName
+      }, { merge: true });
+    }
 
     const userDoc = await db.collection('users').doc(userId).get();
     if (!userDoc.exists) {
@@ -34,7 +41,7 @@ async function getUserRooms(req, res, next) {
 async function createRoom(req, res, next) {
   try {
     if (!db) return res.status(500).json({ message: 'Firebase not initialized' });
-    const { userId, name } = req.body;
+    const { userId, name, ownerName } = req.body;
 
     if (!userId) return res.status(400).json({ message: 'userId required' });
 
@@ -43,13 +50,19 @@ async function createRoom(req, res, next) {
     await db.collection('rooms').doc(roomId).set({
       name: name || 'New Room',
       ownerId: userId,
+      ownerName: ownerName || 'Unknown',
       collaborators: [userId],
       createdAt: new Date()
     });
 
-    await db.collection('users').doc(userId).set({
+    const userUpdate = {
       rooms: admin.firestore.FieldValue.arrayUnion(roomId)
-    }, { merge: true });
+    };
+    if (ownerName) {
+      userUpdate.fullName = ownerName;
+    }
+
+    await db.collection('users').doc(userId).set(userUpdate, { merge: true });
 
     res.status(201).json({ roomId, name });
   } catch (err) {
@@ -114,10 +127,27 @@ async function getRoomById(req, res, next) {
       });
     }
 
+    const roomData = roomDoc.data();
+    let ownerName = roomData.ownerName;
+
+    // Self-healing database lookup for owner name
+    if (!ownerName && roomData.ownerId) {
+      const ownerDoc = await db.collection('users').doc(roomData.ownerId).get();
+      if (ownerDoc.exists && ownerDoc.data().fullName) {
+        ownerName = ownerDoc.data().fullName;
+        try {
+          await db.collection('rooms').doc(roomId).update({ ownerName });
+        } catch (updateErr) {
+          console.warn('Failed to update ownerName in room document:', updateErr.message);
+        }
+      }
+    }
+
     res.json({
       room: {
         id: roomDoc.id,
-        ...roomDoc.data()
+        ...roomData,
+        ownerName: ownerName || 'Unknown'
       }
     });
 

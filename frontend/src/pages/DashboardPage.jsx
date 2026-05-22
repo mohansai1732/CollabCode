@@ -68,7 +68,7 @@ export default function DashboardPage() {
   const loadRooms = async () => {
     try {
       setLoading(true);
-      const rooms = await fetchUserRooms(user.id);
+      const rooms = await fetchUserRooms(user.id, user.fullName);
       setRecentRooms(rooms);
     } catch (err) {
       console.error('Failed to load rooms:', err.message);
@@ -124,7 +124,7 @@ export default function DashboardPage() {
     if (!roomInputValue?.trim()) return;
     try {
       setActionError('');
-      const { roomId } = await createRoom(user.id, roomInputValue);
+      const { roomId } = await createRoom(user.id, roomInputValue, user.fullName);
       window.location.href = `/editor/${roomId}`;
     } catch (err) {
       setActionError('Failed to create room: ' + err.message);
@@ -281,7 +281,7 @@ export default function DashboardPage() {
             </div>
 
             <span className="text-xl text-white font-bold tracking-tight">
-              CodeSync
+              CollabCode
             </span>
           </Link>
 
@@ -587,7 +587,7 @@ export default function DashboardPage() {
 
                             <span className="flex items-center gap-1">
                               <Users className="w-4 h-4" />
-                              Host: {req.roomOwner || 'Unknown'}
+                              Host: {req.roomOwnerName || req.roomOwner || 'Unknown'}
                             </span>
 
                             <span className="flex items-center gap-1">

@@ -12,13 +12,13 @@ import {
 
 import { db } from "../config/firebase";
 
-export const fetchUserRooms = async (userId) => {
-  const response = await api.get(`/rooms/${userId}`);
+export const fetchUserRooms = async (userId, userName) => {
+  const response = await api.get(`/rooms/${userId}${userName ? `?userName=${encodeURIComponent(userName)}` : ''}`);
   return response.data.rooms;
 };
 
-export const createRoom = async (userId, name) => {
-  const response = await api.post('/rooms', { userId, name });
+export const createRoom = async (userId, name, ownerName) => {
+  const response = await api.post('/rooms', { userId, name, ownerName });
   return response.data;
 };
 
@@ -95,6 +95,9 @@ async (
 
         roomOwner:
           room.ownerId,
+
+        roomOwnerName:
+          room.ownerName || "Unknown",
 
         userId: user.id,
 
