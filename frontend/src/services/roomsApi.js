@@ -97,7 +97,7 @@ async (
           room.ownerId,
 
         roomOwnerName:
-          room.ownerName || "Unknown",
+          room.ownerName || null,
 
         userId: user.id,
 

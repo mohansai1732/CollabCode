@@ -587,7 +587,7 @@ export default function DashboardPage() {
 
                             <span className="flex items-center gap-1">
                               <Users className="w-4 h-4" />
-                              Host: {req.roomOwnerName || req.roomOwner || 'Unknown'}
+                              Host: {req.roomOwnerName && req.roomOwnerName !== 'Unknown' ? req.roomOwnerName : req.roomOwner || 'Unknown'}
                             </span>
 
                             <span className="flex items-center gap-1">
