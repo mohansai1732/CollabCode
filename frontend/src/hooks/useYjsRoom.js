@@ -21,6 +21,7 @@ export function useYjsRoom(roomId) {
   const providerRef = useRef(null);
 
   useEffect(() => {
+    if (!roomId) return;
     let cancelled = false;
     const doc = new Y.Doc();
     const sources = doc.getMap('sources');

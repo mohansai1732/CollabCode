@@ -16,7 +16,9 @@ import {
   Send,
   Users,
   LogOut,
-  ChevronLeft
+  ChevronLeft,
+  Lock,
+  Clock
 } from 'lucide-react';
 
 import {
@@ -38,6 +40,10 @@ import {
   fetchRoomRequests,
   approveJoinRequest,
   rejectJoinRequest,
+  fetchRoomById,
+  fetchMyRequests,
+  createJoinRequest,
+  cancelJoinRequest,
 } from '@/services/roomsApi';
 
 // import { executeCode } from '@/services/pistonApi';
@@ -48,6 +54,7 @@ import {
 } from '@/utils/languages';
 
 import { Button } from '@/components/Button';
+import { Card } from '@/components/Card';
 
 const COLORS = ['#38bdf8', '#a78bfa', '#f472b6', '#34d399', '#fbbf24'];
 
@@ -65,7 +72,128 @@ export default function EditorWorkspace() {
     }
   }, [isLoaded, user]);
 
-  const { doc, provider, sources, langs, synced } = useYjsRoom(roomId);
+  // Access check state
+  const [room, setRoom] = useState(null);
+  const [checkingAccess, setCheckingAccess] = useState(true);
+  const [hasAccess, setHasAccess] = useState(false);
+  const [myRequest, setMyRequest] = useState(null);
+  const [isSendingRequest, setIsSendingRequest] = useState(false);
+  const [requestError, setRequestError] = useState('');
+
+  // 2. Access Check: Verify if user is collaborator, or if request is pending
+  useEffect(() => {
+    if (!isLoaded || !user || !roomId) return;
+
+    let active = true;
+
+    const checkAccess = async () => {
+      try {
+        const roomData = await fetchRoomById(roomId);
+        if (!active) return;
+
+        if (!roomData) {
+          setRoom(null);
+          setCheckingAccess(false);
+          return;
+        }
+
+        setRoom(roomData);
+
+        const isCollaborator = roomData.ownerId === user.id || 
+          (roomData.collaborators && roomData.collaborators.includes(user.id));
+
+        if (isCollaborator) {
+          setHasAccess(true);
+          setCheckingAccess(false);
+        } else {
+          // Fetch user's requests
+          const myRequests = await fetchMyRequests(user.id);
+          if (!active) return;
+
+          const pendingReq = myRequests.find(r => r.roomId === roomId && r.status === 'pending');
+          setMyRequest(pendingReq || null);
+          setHasAccess(false);
+          setCheckingAccess(false);
+        }
+      } catch (err) {
+        console.error('Access check failed:', err);
+        if (active) {
+          setCheckingAccess(false);
+        }
+      }
+    };
+
+    checkAccess();
+
+    return () => {
+      active = false;
+    };
+  }, [isLoaded, user?.id, roomId]);
+
+  // 3. Polling: Auto-transition when approved by host
+  useEffect(() => {
+    if (hasAccess || !user || !roomId || !myRequest) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const roomData = await fetchRoomById(roomId);
+        if (roomData) {
+          const isCollaborator = roomData.ownerId === user.id || 
+            (roomData.collaborators && roomData.collaborators.includes(user.id));
+          if (isCollaborator) {
+            setRoom(roomData);
+            setHasAccess(true);
+          }
+        }
+      } catch (err) {
+        console.error('Polling room status failed:', err);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [hasAccess, user?.id, roomId, myRequest]);
+
+  const handleSendRequest = async () => {
+    if (!user || !room) return;
+    try {
+      setIsSendingRequest(true);
+      setRequestError('');
+      const reqId = await createJoinRequest(user, room);
+      setMyRequest({
+        id: reqId,
+        roomId: room.id,
+        roomName: room.name,
+        roomLanguage: room.language || 'javascript',
+        roomOwner: room.ownerId,
+        roomOwnerName: room.ownerName || null,
+        userId: user.id,
+        userName: user.fullName,
+        status: 'pending',
+        createdAt: Date.now()
+      });
+    } catch (err) {
+      console.error('Failed to create join request:', err);
+      setRequestError('Failed to send join request. Please try again.');
+    } finally {
+      setIsSendingRequest(false);
+    }
+  };
+
+  const handleCancelRequest = async () => {
+    if (!myRequest) return;
+    try {
+      setIsSendingRequest(true);
+      await cancelJoinRequest(myRequest.id);
+      setMyRequest(null);
+    } catch (err) {
+      console.error('Failed to cancel request:', err);
+      setRequestError('Failed to cancel request. Please try again.');
+    } finally {
+      setIsSendingRequest(false);
+    }
+  };
+
+  const { doc, provider, sources, langs, synced } = useYjsRoom(hasAccess ? roomId : null);
 
   // Stable Naming from Clerk
   const displayName = useMemo(() => {
@@ -86,7 +214,7 @@ export default function EditorWorkspace() {
     return COLORS[Math.abs(hash) % COLORS.length];
   }, [displayName]);
 
-  const { peerCount, messages, sendMessage } = useChatSocket(roomId, displayName);
+  const { peerCount, messages, sendMessage } = useChatSocket(hasAccess ? roomId : null, displayName);
 
   const [language, setLanguage] = useState('javascript');
   const [output, setOutput] = useState('');
@@ -460,13 +588,140 @@ editorRef.current = editor;
     setTimeout(() => setCopyOk(false), 2000);
   };
 
-  if (isSyncing) {
+  if (checkingAccess || (hasAccess && isSyncing)) {
     return (
       <div className="flex h-screen items-center justify-center bg-zinc-950 text-white">
         <div className="flex flex-col items-center gap-4">
           <div className="h-12 w-12 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
-          <p className="text-zinc-400 animate-pulse">Initializing workspace...</p>
+          <p className="text-zinc-400 animate-pulse">
+            {checkingAccess ? 'Verifying access permissions...' : 'Initializing workspace...'}
+          </p>
         </div>
+      </div>
+    );
+  }
+
+  if (!room) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-zinc-950 text-white p-4">
+        <Card className="max-w-md w-full p-8 text-center" glass>
+          <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-6 text-red-500">
+            <Lock className="w-8 h-8" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Room Not Found</h2>
+          <p className="text-zinc-400 mb-6">
+            The room code may be incorrect, or the room may have been deleted.
+          </p>
+          <Link to="/dashboard" className="w-full block">
+            <Button variant="primary" className="w-full">
+              Back to Dashboard
+            </Button>
+          </Link>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!hasAccess) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-zinc-950 text-white p-4">
+        <Card className="max-w-md w-full p-8 text-center" glass>
+          {myRequest ? (
+            <>
+              <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-6 text-amber-500">
+                <Clock className="w-8 h-8 animate-pulse" />
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">Access Pending</h2>
+              <p className="text-zinc-400 mb-6">
+                Waiting for the host to approve your request to join <strong>{room.name}</strong>.
+              </p>
+              
+              <div className="bg-white/5 border border-white/10 rounded-xl p-4 mb-6 text-left space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-500">Room Name:</span>
+                  <span className="text-white font-medium">{room.name}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-500">Language:</span>
+                  <span className="text-white uppercase font-mono">{room.language || 'javascript'}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-500">Host:</span>
+                  <span className="text-white font-medium font-mono text-xs">
+                    {room.ownerName && room.ownerName !== 'Unknown' ? room.ownerName : room.ownerId}
+                  </span>
+                </div>
+              </div>
+
+              {requestError && (
+                <p className="text-red-400 text-sm mb-4">{requestError}</p>
+              )}
+
+              <div className="flex flex-col gap-2">
+                <Button 
+                  variant="ghost" 
+                  className="bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                  onClick={handleCancelRequest}
+                  disabled={isSendingRequest}
+                >
+                  {isSendingRequest ? 'Canceling...' : 'Cancel Request'}
+                </Button>
+                <Link to="/dashboard" className="w-full">
+                  <Button variant="secondary" className="w-full">
+                    Go to Dashboard
+                  </Button>
+                </Link>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center mx-auto mb-6 text-blue-500">
+                <Lock className="w-8 h-8" />
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">Access Required</h2>
+              <p className="text-zinc-400 mb-6">
+                You are not a collaborator of <strong>{room.name}</strong>. Send a request to join this session.
+              </p>
+
+              <div className="bg-white/5 border border-white/10 rounded-xl p-4 mb-6 text-left space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-500">Room Name:</span>
+                  <span className="text-white font-medium">{room.name}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-500">Language:</span>
+                  <span className="text-white uppercase font-mono">{room.language || 'javascript'}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-500">Host:</span>
+                  <span className="text-white font-medium font-mono text-xs">
+                    {room.ownerName && room.ownerName !== 'Unknown' ? room.ownerName : room.ownerId}
+                  </span>
+                </div>
+              </div>
+
+              {requestError && (
+                <p className="text-red-400 text-sm mb-4">{requestError}</p>
+              )}
+
+              <div className="flex flex-col gap-2">
+                <Button 
+                  variant="primary" 
+                  className="w-full"
+                  onClick={handleSendRequest}
+                  disabled={isSendingRequest}
+                >
+                  {isSendingRequest ? 'Sending...' : 'Request Access'}
+                </Button>
+                <Link to="/dashboard" className="w-full">
+                  <Button variant="secondary" className="w-full">
+                    Go to Dashboard
+                  </Button>
+                </Link>
+              </div>
+            </>
+          )}
+        </Card>
       </div>
     );
   }
