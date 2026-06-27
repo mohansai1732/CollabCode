@@ -213,10 +213,9 @@ export default function DashboardPage() {
 }
 }
 
-  const handleCopyRoomLink = async (roomId) => {
-    const link = `${window.location.origin}/editor/${roomId}`;
-    await navigator.clipboard.writeText(link);
-    alert('Room link copied!');
+  const handleCopyRoomCode = async (roomId) => {
+    await navigator.clipboard.writeText(roomId);
+    alert('Room code copied!');
   };
 
   const handleCancelRequest =
@@ -682,7 +681,7 @@ export default function DashboardPage() {
                           className="group-hover:bg-white/10"
                           onClick={(e) => {
                             e.preventDefault();
-                            handleCopyRoomLink(room.link);
+                            handleCopyRoomCode(room.id);
                           }}
                         >
                           <Copy className="w-4 h-4" />

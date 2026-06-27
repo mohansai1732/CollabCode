@@ -582,10 +582,12 @@ editorRef.current = editor;
       }
     };
 
-  const copyLink = async () => {
-    await navigator.clipboard.writeText(window.location.href);
-    setCopyOk(true);
-    setTimeout(() => setCopyOk(false), 2000);
+  const copyRoomCode = async () => {
+    if (roomId) {
+      await navigator.clipboard.writeText(roomId);
+      setCopyOk(true);
+      setTimeout(() => setCopyOk(false), 2000);
+    }
   };
 
   if (checkingAccess || (hasAccess && isSyncing)) {
@@ -741,9 +743,9 @@ editorRef.current = editor;
           <code className="bg-zinc-800 px-2 py-1 rounded text-amber-200 text-sm font-mono">{roomId}</code>
         </div>
 
-        <Button variant="secondary" size="sm" onClick={copyLink} className="gap-2">
+        <Button variant="secondary" size="sm" onClick={copyRoomCode} className="gap-2">
             <Copy className="w-4 h-4" />
-            {copyOk ? 'Copied' : 'Invite'}
+            {copyOk ? 'Code Copied!' : 'Copy Code'}
           </Button>
 
         <Button
