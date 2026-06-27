@@ -10,7 +10,6 @@ import { MonacoBinding } from '../y-monaco-local.js';
 
 import {
   Play,
-  Save,
   MessageSquare,
   Send,
   Users,
@@ -28,12 +27,6 @@ import {
 
 import { useYjsRoom } from '@/hooks/useYjsRoom';
 import { useChatSocket } from '@/hooks/useChatSocket';
-
-import {
-  fetchFiles,
-  createFile,
-  updateFile,
-} from '@/services/filesApi';
 
 import {
   fetchRoomRequests,
@@ -420,33 +413,7 @@ editorRef.current = editor;
     if (modelRef.current) monaco.editor.setModelLanguage(modelRef.current, next);
   };
 
-  const handleSave = async () => {
-    if (!doc) return;
-    const content = doc.getText(ACTIVE_FILENAME).toString();
-    const meta = dbFileRef.current;
 
-    try {
-      let savedFile;
-      console.log('Attempting to save...', { id: meta?.id || meta?._id, roomId, ACTIVE_FILENAME });
-      
-      if (meta?.id || meta?._id) {
-        savedFile = await updateFile(meta.id || meta._id, roomId, { content, language });
-      } else {
-        savedFile = await createFile({ roomId, filename: ACTIVE_FILENAME, language, content });
-      }
-
-      if (savedFile) {
-        dbFileRef.current = savedFile;
-        setOutput('Saved successfully at ' + new Date().toLocaleTimeString());
-        setOutputErr('');
-      }
-    } catch (e) {
-      console.error('Save error:', e);
-      const msg = e.response?.data?.message || e.message;
-      setOutputErr('Save failed: ' + msg);
-    }
-
-  };
 
   const [pyodide, setPyodide] = useState(null);
 
@@ -827,10 +794,7 @@ editorRef.current = editor;
             {LANGUAGE_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
 
-          <Button variant="primary" size="sm" onClick={handleSave} className="gap-2">
-            <Save className="w-4 h-4" />
-            Save
-          </Button>
+
 
           <Button size="sm" onClick={handleRun} disabled={running} className="gap-2 bg-green-600 hover:bg-green-700 border-none">
             <Play className="w-4 h-4" />
