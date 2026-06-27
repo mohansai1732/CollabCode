@@ -20,6 +20,7 @@ import { useState, useEffect } from 'react';
 import {
   useUser,
   useClerk,
+  UserButton,
 } from '@clerk/clerk-react';
 
 import {
@@ -332,37 +333,17 @@ export default function DashboardPage() {
 
           
 
-          <div className="mt-auto flex flex-col gap-1 pb-2">
-            <Link to="/profile">
-              <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-300 hover:bg-white/5 hover:text-white transition-all">
-                <img
-                  src={user?.imageUrl}
-                  alt="profile"
-                  className="w-10 h-10 rounded-full object-cover"
-                />
-
-                <div className="flex-1 text-left min-w-0">
-                  <p className="text-white text-sm truncate">
-                    {user?.fullName}
-                  </p>
-
-                  <p className="text-gray-400 text-xs truncate">
-                    {user?.primaryEmailAddress?.emailAddress}
-                  </p>
-                </div>
-              </button>
-            </Link>
-
-
-            
-            <div className="p-4 border-t border-zinc-800">
-              <button 
-                onClick={() => signOut(() => window.location.href = '/')}
-                className="w-full flex items-center gap-2 p-2 text-zinc-500 hover:text-red-400 transition-colors text-sm"
-              >
-                <LogOut className="w-4 h-4" />
-                Sign Out
-              </button>
+          <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-zinc-800">
+            <div className="flex items-center gap-3 px-2 py-1">
+              <UserButton afterSignOutUrl="/" />
+              <div className="flex-1 text-left min-w-0">
+                <p className="text-white text-sm truncate font-medium">
+                  {user?.fullName}
+                </p>
+                <p className="text-zinc-400 text-xs truncate">
+                  {user?.primaryEmailAddress?.emailAddress}
+                </p>
+              </div>
             </div>
           </div>
         </aside>

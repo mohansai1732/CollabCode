@@ -4,7 +4,6 @@ import LandingPage from '@/pages/LandingPage';
 // import LoginPage from './pages/LoginPage';
 // import SignupPage from './pages/SignupPage';
 import DashboardPage from './pages/DashboardPage';
-import ProfilePage from './pages/ProfilePage';
 import EditorWorkspace from './pages/EditorWorkspace';
 
 
@@ -17,7 +16,6 @@ export default function App() {
           {/* <Route path="/login" element={<LoginPage />}></Route>
           <Route path="/signup" element={<SignupPage />}></Route> */}
           <Route path="/dashboard" element={<DashboardPage />}></Route>
-          <Route path="/profile" element={<ProfilePage />} />
           <Route path="/editor/:roomId" element={<EditorWorkspace />} />
         </Routes>
       </BrowserRouter>
