@@ -677,50 +677,19 @@ editorRef.current = editor;
             </>
           ) : (
             <>
-              <div className="w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center mx-auto mb-6 text-blue-500">
+              <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-6 text-amber-500">
                 <Lock className="w-8 h-8" />
               </div>
-              <h2 className="text-2xl font-bold text-white mb-2">Access Required</h2>
+              <h2 className="text-2xl font-bold text-white mb-2">Room Code Required</h2>
               <p className="text-zinc-400 mb-6">
-                You are not a collaborator of <strong>{room.name}</strong>. Send a request to join this session.
+                Direct URL joining is disabled. To join this room, please ask the host for the 6-character <strong>Room Code</strong> and enter it in the <strong>Join Room</strong> modal on your Dashboard.
               </p>
 
-              <div className="bg-white/5 border border-white/10 rounded-xl p-4 mb-6 text-left space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">Room Name:</span>
-                  <span className="text-white font-medium">{room.name}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">Language:</span>
-                  <span className="text-white uppercase font-mono">{room.language || 'javascript'}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">Host:</span>
-                  <span className="text-white font-medium font-mono text-xs">
-                    {room.ownerName && room.ownerName !== 'Unknown' ? room.ownerName : room.ownerId}
-                  </span>
-                </div>
-              </div>
-
-              {requestError && (
-                <p className="text-red-400 text-sm mb-4">{requestError}</p>
-              )}
-
-              <div className="flex flex-col gap-2">
-                <Button 
-                  variant="primary" 
-                  className="w-full"
-                  onClick={handleSendRequest}
-                  disabled={isSendingRequest}
-                >
-                  {isSendingRequest ? 'Sending...' : 'Request Access'}
+              <Link to="/dashboard" className="w-full">
+                <Button variant="primary" className="w-full">
+                  Go to Dashboard to Enter Code
                 </Button>
-                <Link to="/dashboard" className="w-full">
-                  <Button variant="secondary" className="w-full">
-                    Go to Dashboard
-                  </Button>
-                </Link>
-              </div>
+              </Link>
             </>
           )}
         </Card>
