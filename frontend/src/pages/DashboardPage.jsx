@@ -38,7 +38,7 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState('rooms');
   const { user } = useUser();
   const { signOut } = useClerk();
-  const [recentRooms, setRecentRooms] = useState([]);
+  const [myRooms, setMyRooms] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [showPending, setShowPending] = useState(false);
   const [incomingRequests, setIncomingRequests] = useState([]);
@@ -69,7 +69,7 @@ export default function DashboardPage() {
     try {
       setLoading(true);
       const rooms = await fetchUserRooms(user.id, user.fullName);
-      setRecentRooms(rooms);
+      setMyRooms(rooms);
     } catch (err) {
       console.error('Failed to load rooms:', err.message);
     } finally {
@@ -140,7 +140,7 @@ export default function DashboardPage() {
       user.id
     );
 
-    setRecentRooms(prev =>
+    setMyRooms(prev =>
       prev.filter(
         room => room.id !== roomId
       )
@@ -249,7 +249,7 @@ export default function DashboardPage() {
     },
     {
       label: 'Active Rooms',
-      value: recentRooms.length,
+      value: myRooms.length,
       icon: FolderCode,
       color: 'purple',
     },
@@ -296,19 +296,6 @@ export default function DashboardPage() {
             </button>
 
             <button
-              onClick={() => setActiveTab('recent')}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all ${
-                activeTab === 'recent'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-400 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <Clock className="w-5 h-5" />
-
-              <span>Recent</span>
-            </button>
-
-            <button
               onClick={() => setActiveTab('pending')}
               className={`
                 w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all
@@ -328,7 +315,6 @@ export default function DashboardPage() {
                 </span>
               )}
             </button>
-
           </nav>
 
           
@@ -461,60 +447,11 @@ export default function DashboardPage() {
             ))}
           </div>
 
-            <div className="mb-6 grid grid-cols-1 xl:grid-cols-3 gap-6 items-center">
-
-            <h2 className="text-2xl font-bold text-white">
+            <h2 className="text-2xl font-bold text-white mb-6">
               {activeTab === 'pending'
                 ? 'Pending Requests'
-                : 'Recent Rooms'}
+                : 'My Rooms'}
             </h2>
-
-            {/* <div className="flex justify-end">
-            <button
-              onClick={() => setShowPending(!showPending)}
-              className="inline-flex items-center justify-center gap-2 font-medium transition px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl"
-            >
-              Pending Requests
-            </button>
-          </div> */}
-{/* 
-          {showPending && (
-            <div className="absolute top-20 right-0 w-80 bg-[#111827] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50">
-
-              <div className="p-4 border-b border-white/10">
-                <h3 className="text-white text-lg font-semibold">
-                  Pending Requests
-                </h3>
-              </div>
-
-              {pendingRequests.length === 0 ? (
-                <div className="p-4 text-gray-400">
-                  No pending requests
-                </div>
-              ) : (
-                pendingRequests.map((req) => (
-                  <div
-                    key={req._id}
-                    className="p-4 border-b border-white/5 hover:bg-white/5 transition-all"
-                  >
-
-                    <p className="text-white font-medium">
-                      {req.roomName}
-                    </p>
-
-                    <p className="text-sm text-gray-400 mt-1">
-                      Requested by {req.userName}
-                    </p>
-
-                  </div>
-                ))
-              )}
-
-            </div>
-          )} */}
-
-
-          </div>
 
         <div className="mb-6">
 
@@ -605,7 +542,7 @@ export default function DashboardPage() {
 
             ) : (
 
-              recentRooms.map((room) => (
+              myRooms.map((room) => (
 
                 <Link
                   key={room.id}
