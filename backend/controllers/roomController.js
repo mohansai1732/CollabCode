@@ -120,45 +120,22 @@ async function joinRoom(req, res, next) {
  */
 async function getRoomById(req, res, next) {
   try {
-    if (!db) {
-      return res.status(500).json({ message: 'Firebase not initialized' });
-    }
+    if (!db) return res.status(500).json({ message: 'Firebase not initialized' });
 
     const { roomId } = req.params;
-    if (!roomId) {
-      return res.status(400).json({ message: 'roomId required' });
-    }
+    if (!roomId) return res.status(400).json({ message: 'roomId required' });
 
     const roomDoc = await db.collection('rooms').doc(roomId).get();
-
     if (!roomDoc.exists) {
       return res.status(404).json({ message: 'Room not found' });
-    }
-
-    const roomData = roomDoc.data();
-    let ownerName = roomData.ownerName;
-
-    // Self-healing database lookup: fetch owner's full name if missing in room record
-    if (!ownerName && roomData.ownerId) {
-      const ownerDoc = await db.collection('users').doc(roomData.ownerId).get();
-      if (ownerDoc.exists && ownerDoc.data().fullName) {
-        ownerName = ownerDoc.data().fullName;
-        try {
-          await db.collection('rooms').doc(roomId).update({ ownerName });
-        } catch (updateErr) {
-          console.warn('Failed to update ownerName in room document:', updateErr.message);
-        }
-      }
     }
 
     res.json({
       room: {
         id: roomDoc.id,
-        ...roomData,
-        ownerName: ownerName || 'Unknown'
+        ...roomDoc.data()
       }
     });
-
   } catch (err) {
     next(err);
   }
