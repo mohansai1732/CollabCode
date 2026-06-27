@@ -13,7 +13,6 @@ import {
   TrendingUp,
   Activity,
   Trash2,
-  Copy,
 } from 'lucide-react';
 
 import { useState, useEffect } from 'react';
@@ -213,10 +212,7 @@ export default function DashboardPage() {
 }
 }
 
-  const handleCopyRoomCode = async (roomId) => {
-    await navigator.clipboard.writeText(roomId);
-    alert('Room code copied!');
-  };
+
 
   const handleCancelRequest =
       async (requestId) => {
@@ -654,6 +650,11 @@ export default function DashboardPage() {
                           <div className="flex items-center gap-4 text-sm text-gray-400">
 
                             <span className="flex items-center gap-1">
+                              <span className="text-zinc-500 font-mono text-xs">CODE:</span>
+                              <code className="bg-white/10 px-2 py-0.5 rounded text-amber-300 font-mono font-bold text-xs tracking-wider">{room.id}</code>
+                            </span>
+
+                            <span className="flex items-center gap-1">
                               <FolderCode className="w-4 h-4" />
                               {room.language}
                             </span>
@@ -675,17 +676,6 @@ export default function DashboardPage() {
                       </div>
 
                       <div className="flex items-center gap-2">
-
-                        <Button
-                          variant="ghost"
-                          className="group-hover:bg-white/10"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleCopyRoomCode(room.id);
-                          }}
-                        >
-                          <Copy className="w-4 h-4" />
-                        </Button>
 
                         <Button
                           variant="ghost"

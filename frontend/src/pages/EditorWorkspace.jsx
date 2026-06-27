@@ -9,7 +9,6 @@ import * as Y from 'yjs';
 import { MonacoBinding } from '../y-monaco-local.js';
 
 import {
-  Copy,
   Play,
   Save,
   MessageSquare,
@@ -220,7 +219,6 @@ export default function EditorWorkspace() {
   const [output, setOutput] = useState('');
   const [outputErr, setOutputErr] = useState('');
   const [running, setRunning] = useState(false);
-  const [copyOk, setCopyOk] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [awareUsers, setAwareUsers] = useState([]);
   const [chatOpen, setChatOpen] = useState(true);
@@ -582,13 +580,7 @@ editorRef.current = editor;
       }
     };
 
-  const copyRoomCode = async () => {
-    if (roomId) {
-      await navigator.clipboard.writeText(roomId);
-      setCopyOk(true);
-      setTimeout(() => setCopyOk(false), 2000);
-    }
-  };
+
 
   if (checkingAccess || (hasAccess && isSyncing)) {
     return (
@@ -708,14 +700,9 @@ editorRef.current = editor;
         <div className="h-6 w-px bg-zinc-800" />
         
         <div className="flex items-center gap-2">
-          <span className="text-zinc-500 font-mono text-sm">ROOM:</span>
-          <code className="bg-zinc-800 px-2 py-1 rounded text-amber-200 text-sm font-mono">{roomId}</code>
+          <span className="text-zinc-500 font-mono text-sm">ROOM CODE:</span>
+          <code className="bg-zinc-800 px-2 py-1 rounded text-amber-200 text-sm font-mono tracking-wider font-bold">{roomId}</code>
         </div>
-
-        <Button variant="secondary" size="sm" onClick={copyRoomCode} className="gap-2">
-            <Copy className="w-4 h-4" />
-            {copyOk ? 'Code Copied!' : 'Copy Code'}
-          </Button>
 
         <Button
           variant="secondary"
