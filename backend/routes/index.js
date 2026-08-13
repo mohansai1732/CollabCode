@@ -1,12 +1,12 @@
+// const fileRoutes = require('./fileRoutes');
 const express = require('express');
-const fileRoutes = require('./fileRoutes');
 const roomRoutes = require('./roomRoutes');
-const executeRoute = require('./executeRoute');
+// const executeRoute = require('./executeRoute');
 
 const router = express.Router();
 
-router.use('/files', fileRoutes);
+// router.use('/files', fileRoutes);
+// router.use('/execute', executeRoute);
 router.use('/rooms', roomRoutes);
-router.use('/execute', executeRoute);
 
 module.exports = router;

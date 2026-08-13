@@ -1,8 +1,12 @@
-export function newRoomCode() {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  let s = '';
-  for (let i = 0; i < 8; i += 1) {
-    s += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return s;
-}
+// import crypto from 'crypto';
+
+// export function newRoomCode(length = 8) {
+//   const chars = '1';
+
+//   let code = '';
+//   for (let i = 0; i < length; i++) {
+//     const index = crypto.randomInt(0, chars.length);
+//     code += chars[index];
+//   }
+//   return code;
+// }

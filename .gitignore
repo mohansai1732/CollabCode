@@ -1,7 +1,5 @@
 # Dependencies
 node_modules/
-frontend/node_modules/
-backend/node_modules/
 
 # Environment variables
 .env
@@ -12,7 +10,6 @@ backend/serviceAccountKey.json
 # Build folders
 dist/
 build/
-frontend/dist/
 
 # Logs
 *.log
@@ -24,6 +21,3 @@ npm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
-
-#unused files
-frontend/src/backup/

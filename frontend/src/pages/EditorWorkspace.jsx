@@ -36,14 +36,12 @@ import {
   fetchMyRequests,
   createJoinRequest,
   cancelJoinRequest,
+  removeCollaborator,
 } from '@/services/roomsApi';
 
 // import { executeCode } from '@/services/pistonApi';
 
-import {
-  getLanguageOption,
-  LANGUAGE_OPTIONS,
-} from '@/utils/languages';
+import { getLanguageOption , LANGUAGE_OPTIONS } from '@/utils/languages';
 
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
@@ -80,7 +78,7 @@ export default function EditorWorkspace() {
 
     const checkAccess = async () => {
       try {
-        const roomData = await fetchRoomById(roomId);
+        const roomData = await fetchRoomById(roomId, user.id);
         if (!active) return;
 
         if (!roomData) {
@@ -91,8 +89,10 @@ export default function EditorWorkspace() {
 
         setRoom(roomData);
 
-        const isCollaborator = roomData.ownerId === user.id || 
-          (roomData.collaborators && roomData.collaborators.includes(user.id));
+        const isCollaborator = roomData.ownerId === user.id ||
+          roomData.collaborators?.some(collaborator =>
+            (typeof collaborator === 'string' ? collaborator : collaborator.userId) === user.id
+          );
 
         if (isCollaborator) {
           setHasAccess(true);
@@ -128,10 +128,12 @@ export default function EditorWorkspace() {
 
     const interval = setInterval(async () => {
       try {
-        const roomData = await fetchRoomById(roomId);
+        const roomData = await fetchRoomById(roomId, user.id);
         if (roomData) {
-          const isCollaborator = roomData.ownerId === user.id || 
-            (roomData.collaborators && roomData.collaborators.includes(user.id));
+          const isCollaborator = roomData.ownerId === user.id ||
+            roomData.collaborators?.some(collaborator =>
+              (typeof collaborator === 'string' ? collaborator : collaborator.userId) === user.id
+            );
           if (isCollaborator) {
             setRoom(roomData);
             setHasAccess(true);
@@ -185,6 +187,22 @@ export default function EditorWorkspace() {
     }
   };
 
+  // remove collaborator from room
+  const handleRemoveCollaborator = async () => {
+    try {
+      await removeCollaborator(
+        roomId,
+        selectedCollaborator.userId,
+        user.id,
+      );
+      setShowRemoveModal(false);
+      setSelectedCollaborator(null);
+
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const { doc, provider, sources, langs, synced } = useYjsRoom(hasAccess ? roomId : null);
 
   // Stable Naming from Clerk
@@ -206,9 +224,9 @@ export default function EditorWorkspace() {
     return COLORS[Math.abs(hash) % COLORS.length];
   }, [displayName]);
 
-  const { peerCount, messages, sendMessage } = useChatSocket(hasAccess ? roomId : null, displayName);
+  const { peerCount, messages, sendMessage } = useChatSocket(hasAccess ? roomId : null, displayName, user?.id);
 
-  const [language, setLanguage] = useState('javascript');
+  const [language, setLanguage] = useState('python');
   const [output, setOutput] = useState('');
   const [outputErr, setOutputErr] = useState('');
   const [running, setRunning] = useState(false);
@@ -218,6 +236,8 @@ export default function EditorWorkspace() {
   const [isSyncing, setIsSyncing] = useState(true);
   const [showPending, setShowPending] = useState(false);
   const [pendingRequests, setPendingRequests] = useState([]);
+  const [showRemoveModal, setShowRemoveModal] = useState(false);
+  const [selectedCollaborator, setSelectedCollaborator] = useState(null);
 
 
   const editorRef = useRef(null);
@@ -245,7 +265,7 @@ export default function EditorWorkspace() {
         
         if (mainFile) {
           dbFileRef.current = mainFile;
-          setLanguage(mainFile.language || 'javascript');
+          setLanguage(mainFile.language || 'python');
         }
 
         doc.transact(() => {
@@ -255,7 +275,7 @@ export default function EditorWorkspace() {
             t.insert(0, mainFile.content);
           }
           if (!langs.has(ACTIVE_FILENAME)) {
-            langs.set(ACTIVE_FILENAME, mainFile?.language || 'javascript');
+            langs.set(ACTIVE_FILENAME, mainFile?.language || 'python');
           }
         });
         
@@ -385,14 +405,6 @@ monacoNs.editor.setModelMarkers(
 );
 
 
-
-// const binding = new MonacoBinding(
-//   monacoNs,
-//   ytext,
-//   model,
-//   new Set([editor]),
-//   provider.awareness
-// );
 const binding = new MonacoBinding(
   monacoNs,
   ytext,
@@ -526,26 +538,25 @@ editorRef.current = editor;
     }
   };
 
-  const loadPendingRequests =
-    async () => { 
+  const loadPendingRequests = async () => { 
 
-      if (!user?.id) return;
+    if (!user?.id) return;
 
-      try {
+    try {
 
-        const requests =
-          await fetchRoomRequests(user.id);
+      const requests =
+        await fetchRoomRequests(roomId, user.id);
 
-        setPendingRequests(requests);
+      setPendingRequests(requests);
 
-      } catch (err) {
+    } catch (err) {
 
-        console.error(
-          'Failed to load requests:',
-          err
-        );
-      }
-    };
+      console.error(
+        'Failed to load requests:',
+        err
+      );
+    }
+  };
 
 
 
@@ -722,7 +733,7 @@ editorRef.current = editor;
 
                       try {
 
-                        await approveJoinRequest(req);
+                        await approveJoinRequest(req, user.id);
 
                         // instantly update UI
                         setPendingRequests(prev =>
@@ -746,7 +757,7 @@ editorRef.current = editor;
 
                       try {
 
-                        await rejectJoinRequest(req.id);
+                        await rejectJoinRequest(req, user.id);
 
                         // instantly update UI
                         setPendingRequests(prev =>
@@ -838,6 +849,73 @@ editorRef.current = editor;
                       {u.name}
                       {u.name === displayName && <span className="ml-2 text-[10px] text-zinc-500">(You)</span>}
                     </span>
+                      <div className="relative group">
+                      {/* <button className="text-zinc-400 hover:text-white px-2 cursor-pointer">
+                        ⋮
+                      </button> */}
+
+                      <div className="absolute right-0 top-full mt-1 w-40 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                        <button className="w-full text-left px-4 py-2 text-sm hover:bg-zinc-800 rounded-t-lg">
+                          👤 Profile
+                        </button>
+
+                        {room.ownerId === user.id && u.userId !== user.id && (
+                        
+                        <><button className="w-full text-left px-4 py-2 text-sm hover:bg-zinc-800">
+                            🔇 Mute
+                          </button><button
+                            onClick={() => { setSelectedCollaborator(u); setShowRemoveModal(true); } }
+                            className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-600 hover:text-white rounded-b-lg">
+                              🗑 Remove
+                            </button></>
+                        )}
+                      
+                    
+                        {showRemoveModal && (
+                          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999]">
+                            <div className="w-[420px] bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl">
+
+                              <div className="p-6 border-b border-zinc-800">
+                                <h2 className="text-xl font-semibold text-white">
+                                  Remove Collaborator
+                                </h2>
+
+                                <p className="text-zinc-400 mt-2">
+                                  Are you sure you want to remove
+                                  <span className="text-white font-semibold">
+                                    {" "}{selectedCollaborator?.name}
+                                  </span>
+                                  {" "}from this room?
+                                </p>
+                              </div>
+
+                              <div className="flex justify-end gap-3 p-5">
+
+                                <button
+                                  onClick={() => {
+                                    setShowRemoveModal(false);
+                                    setSelectedCollaborator(null);
+                                  }}
+                                  className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
+                                >
+                                  Cancel
+                                </button>
+
+                                <button
+                                  onClick={handleRemoveCollaborator}
+                                  className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white"
+                                >
+                                  Remove
+                                </button>
+
+                              </div>
+
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
                   </div>
                 ))}
               </div>

@@ -39,6 +39,11 @@ export function useYjsRoom(roomId) {
     });
 
     providerRef.current = provider;
+    // console.log(provider);
+
+    provider.socket.on("room:removed", () => {
+      console.log("You were removed from the room.");
+    });
 
     setState({ doc, provider, sources, langs, synced: false });
 

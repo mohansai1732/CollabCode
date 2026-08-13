@@ -1,198 +1,292 @@
+const crypto = require('crypto');
 const { db, admin } = require('../config/firebaseAdmin');
+const { getIO, disconnectRoomUser, closeYjsRoom } = require('../utils/socketManager');
+const { validId, requireUserId } = require('../utils/validation');
 
-/**
- * GET /api/rooms/user/:userId
- * Fetches all rooms associated with a specific user from Firestore
- */
+const TIERS = { free: { rooms: 3, editors: 3 }, pro: { rooms: 10, editors: 10 } };
+const now = () => admin.firestore.Timestamp.now();
+const array = value => Array.isArray(value) ? value : [];
+const collaboratorId = entry => typeof entry === 'string' ? entry : entry?.userId;
+const normalizeCollaborators = value => array(value).map(entry => typeof entry === 'string'
+  ? { userId: entry, joinedAt: now(), muted: false, mutedReason: null }
+  : { muted: false, mutedReason: null, ...entry });
+
+function subscriptionFor(user) {
+  const subscription = user?.subscription || {};
+  const expired = subscription.tier === 'pro' && subscription.endDate?.toDate?.() < new Date();
+  return { tier: expired ? 'free' : (subscription.tier || 'free'), status: expired ? 'expired' : (subscription.status || 'active') };
+}
+
+function isMember(room, userId) {
+  return room.ownerId === userId || normalizeCollaborators(room.collaborators).some(c => c.userId === userId);
+}
+
+function publicRoom(doc) { return { id: doc.id, ...doc.data(), collaborators: normalizeCollaborators(doc.data().collaborators) }; }
+function audit(action, actorId, targetId, roomId) { console.info(JSON.stringify({ audit: action, actorId, targetId: targetId || null, roomId, timestamp: new Date().toISOString() })); }
+
+async function recalculateEditAccess(roomRef, room, transaction) {
+  const owner = await transaction.get(db.collection('users').doc(room.ownerId));
+  const tier = subscriptionFor(owner.data()).tier;
+  const limit = TIERS[tier].editors;
+  const collaborators = normalizeCollaborators(room.collaborators).sort((a, b) => (a.joinedAt?.toMillis?.() || 0) - (b.joinedAt?.toMillis?.() || 0));
+  // The owner is an editor; earliest joined collaborators receive remaining slots.
+  const updated = collaborators.map((c, index) => index < limit - 1
+    ? (c.mutedReason === 'planLimit' ? { ...c, muted: false, mutedReason: null } : c)
+    : { ...c, muted: true, mutedReason: 'planLimit' });
+  transaction.update(roomRef, { collaborators: updated });
+  return updated;
+}
+
+function emitRoom(roomId, event, payload) { getIO()?.to(`app:${roomId}`).emit(event, payload); }
+
 async function getUserRooms(req, res, next) {
   try {
-    if (!db) return res.status(500).json({ message: 'Firebase not initialized' });
-    const { userId } = req.params;
-    const { userName } = req.query;
-
-    // Save or update user's name in Firestore if provided
-    if (userName) {
-      await db.collection('users').doc(userId).set({
-        fullName: userName
-      }, { merge: true });
-    }
-
-    // Read user document to get their joined room IDs
-    const userDoc = await db.collection('users').doc(userId).get();
-    if (!userDoc.exists) {
-      return res.json({ rooms: [] });
-    }
-    const roomIds = userDoc.data().rooms || [];
-    if (roomIds.length === 0) return res.json({ rooms: [] });
-
-    // Fetch all room documents in parallel using Promise.all (clean & fast)
-    const roomDocs = await Promise.all(
-      roomIds.map(id => db.collection('rooms').doc(id).get())
-    );
-
-    // Filter out deleted rooms and format room data
-    const rooms = roomDocs
-      .filter(doc => doc.exists)
-      .map(doc => ({ id: doc.id, ...doc.data() }));
-    
-    res.json({ rooms });
-  } catch (err) {
-    next(err);
-  }
+    const userId = req.params.userId;
+    if (!requireUserId(userId, res)) return;
+    const userRef = db.collection('users').doc(userId);
+    const userDoc = await userRef.get();
+    if (!userDoc.exists) return res.json({ rooms: [], subscription: { tier: 'free', status: 'active' } });
+    const data = userDoc.data();
+    const roomDocs = await Promise.all(array(data.rooms).map(id => db.collection('rooms').doc(id).get()));
+    res.json({ rooms: roomDocs.filter(doc => doc.exists).map(publicRoom), subscription: subscriptionFor(data) });
+  } catch (error) { next(error); }
 }
 
-/**
- * POST /api/rooms/create
- * Creates a new coding room and sets the creator as owner
- */
 async function createRoom(req, res, next) {
   try {
-    if (!db) return res.status(500).json({ message: 'Firebase not initialized' });
-    const { userId, name, ownerName } = req.body;
-
-    if (!userId) return res.status(400).json({ message: 'userId required' });
-
-    // Generate a random 6-character unique Room ID (e.g. 'a7x9b2')
-    const roomId = Math.random().toString(36).substring(2, 8);
-    
-    // Save new room document into 'rooms' collection
-    await db.collection('rooms').doc(roomId).set({
-      name: name || 'New Room',
-      ownerId: userId,
-      ownerName: ownerName || 'Unknown',
-      collaborators: [userId],
-      createdAt: new Date()
+    const userId = req.body.userId;
+    if (!requireUserId(userId, res)) return;
+    const name = String(req.body.name || 'New Room').trim().slice(0, 120);
+    const ownerName = String(req.body.ownerName || 'Unknown').trim().slice(0, 120);
+    if (!name) return res.status(400).json({ message: 'Room name required.' });
+    const roomId = crypto.randomBytes(4).toString('hex').slice(0, 6);
+    await db.runTransaction(async transaction => {
+      const userRef = db.collection('users').doc(userId);
+      const userDoc = await transaction.get(userRef);
+      const owned = (await transaction.get(db.collection('rooms').where('ownerId', '==', userId))).size;
+      const subscription = subscriptionFor(userDoc.data());
+      if (owned >= TIERS[subscription.tier].rooms) {
+        const error = new Error('You have reached your room limit. Upgrade to Pro to create up to 10 rooms.'); error.status = 403; throw error;
+      }
+      transaction.set(db.collection('rooms').doc(roomId), { name, ownerId: userId, ownerName, collaborators: [], pendingRequests: [], createdAt: now() });
+      transaction.set(userRef, { fullName: ownerName, rooms: admin.firestore.FieldValue.arrayUnion(roomId), subscription: userDoc.exists ? userDoc.data().subscription || { tier: 'free', status: 'active' } : { tier: 'free', status: 'active' } }, { merge: true });
     });
-
-    // Add this room ID to creator's list of joined rooms
-    const userUpdate = {
-      rooms: admin.firestore.FieldValue.arrayUnion(roomId)
-    };
-    if (ownerName) {
-      userUpdate.fullName = ownerName;
-    }
-
-    await db.collection('users').doc(userId).set(userUpdate, { merge: true });
-
+    audit('room.create', userId, null, roomId);
     res.status(201).json({ roomId, name });
-  } catch (err) {
-    next(err);
-  }
+  } catch (error) { next(error); }
 }
 
-/**
- * POST /api/rooms/join
- * Adds a user as a collaborator to an existing room
- */
-async function joinRoom(req, res, next) {
-  try {
-    if (!db) return res.status(500).json({ message: 'Firebase not initialized' });
-    const { userId, roomId } = req.body;
-
-    if (!userId || !roomId) return res.status(400).json({ message: 'userId and roomId required' });
-
-    const roomRef = db.collection('rooms').doc(roomId);
-    const roomDoc = await roomRef.get();
-    
-    if (!roomDoc.exists) {
-      return res.status(404).json({ message: 'Room not found' });
-    }
-
-    // Add user ID to room's collaborators list
-    await roomRef.update({
-      collaborators: admin.firestore.FieldValue.arrayUnion(userId)
-    });
-
-    // Add room ID to user's list of active rooms
-    await db.collection('users').doc(userId).set({
-      rooms: admin.firestore.FieldValue.arrayUnion(roomId)
-    }, { merge: true });
-
-    res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * GET /api/rooms/:roomId
- * Fetches details for a single room by ID
- */
 async function getRoomById(req, res, next) {
   try {
-    if (!db) return res.status(500).json({ message: 'Firebase not initialized' });
+    const roomId = req.params.roomId;
+    if (!validId(roomId)) return res.status(400).json({ message: 'Invalid room ID.' });
+    const doc = await db.collection('rooms').doc(roomId).get();
+    if (!doc.exists) return res.status(404).json({ message: 'Room not found.' });
+    const userId = req.query.userId;
+    if (!requireUserId(userId, res)) return;
+    if (!isMember(doc.data(), userId)) return res.status(403).json({ message: 'You are not a collaborator in this room.' });
+    res.json({ room: publicRoom(doc) });
+  } catch (error) { next(error); }
+}
 
-    const { roomId } = req.params;
-    if (!roomId) return res.status(400).json({ message: 'roomId required' });
+async function requestJoin(req, res, next) {
+  try {
+    const userId = req.body?.userId;
+    const roomId = typeof req.body?.roomId === 'string' ? req.body.roomId.trim() : '';
+    if (!requireUserId(userId, res)) return;
+    if (!roomId) return res.status(400).json({ message: 'Missing: roomId.' });
+    if (!validId(roomId)) return res.status(400).json({ message: 'Invalid room ID.' });
+    let ownerId;
+    await db.runTransaction(async transaction => {
+      const ref = db.collection('rooms').doc(roomId); const doc = await transaction.get(ref);
+      if (!doc.exists) { const error = new Error('Room not found.'); error.status = 404; throw error; }
+      const room = doc.data(); ownerId = room.ownerId;
+      if (isMember(room, userId) || array(room.pendingRequests).some(r => r.userId === userId)) return;
 
-    const roomDoc = await db.collection('rooms').doc(roomId).get();
-    if (!roomDoc.exists) {
-      return res.status(404).json({ message: 'Room not found' });
-    }
-
-    res.json({
-      room: {
-        id: roomDoc.id,
-        ...roomDoc.data()
-      }
+      // Maintain both the detailed object array and the simple string array for Firestore querying
+      transaction.update(ref, { 
+        pendingRequests: [...array(room.pendingRequests), { id: crypto.randomUUID(), userId, requestedAt: now() }],
+        pendingUserIds: admin.firestore.FieldValue.arrayUnion(userId)
+      });
     });
-  } catch (err) {
-    next(err);
+    // Application socket only: notifications and membership state never use Yjs.
+    emitRoom(roomId, 'room:request-created', { roomId, userId, ownerId });
+    res.json({ ok: true });
+  } catch (error) { next(error); }
+}
+
+
+async function listRequests(req, res, next) {
+  try {
+    const roomId = req.params.roomId; const doc = await db.collection('rooms').doc(roomId).get();
+    if (!doc.exists) return res.status(404).json({ message: 'Room not found.' });
+    const userId = req.query.userId;
+    if (!requireUserId(userId, res)) return;
+    if (doc.data().ownerId !== userId) return res.status(403).json({ message: 'Only the room owner can view requests.' });
+    res.json({ requests: array(doc.data().pendingRequests) });
+  } catch (error) { next(error); }
+}
+
+async function fetchMyRequests(req, res, next) {
+  try {
+    const userId = req.params.userId;
+
+    if (!requireUserId(userId, res)) return;
+
+    const snapshot = await db.collection('rooms')
+      .where('pendingUserIds', 'array-contains', userId)
+      .get();
+
+    const requests = [];
+
+    snapshot.docs.forEach(doc => {
+      const room = doc.data();
+
+      const request = array(room.pendingRequests).find(
+        r => r.userId === userId
+      );
+
+      if (!request) return;
+
+      requests.push({
+        id: request.id,
+        roomId: doc.id,
+        roomName: room.name || 'Unnamed Room',
+        ownerId: room.ownerId,
+        ownerName: room.ownerName || 'Unknown',
+        requestedAt: request.requestedAt,
+      });
+    });
+
+    res.json({ requests });
+
+  } catch (error) {
+    next(error);
   }
 }
 
-/**
- * DELETE /api/rooms/:roomId
- * Deletes a room (if user is owner) or leaves the room (if collaborator)
- */
+async function decideRequest(req, res, next) {
+  try {
+    const { roomId, userId: targetUserId } = req.params; const actorId = req.body.userId; const accepted = req.body.accept === true;
+    if (!validId(roomId) || !validId(targetUserId) || !requireUserId(actorId, res)) return res.status(400).json({ message: 'Invalid identifier.' });
+    let collaborators;
+    await db.runTransaction(async transaction => {
+      const ref = db.collection('rooms').doc(roomId); const doc = await transaction.get(ref);
+      if (!doc.exists) { const error = new Error('Room not found.'); error.status = 404; throw error; }
+      const room = doc.data();
+      if (room.ownerId !== actorId) { const error = new Error('Only the room owner can manage requests.'); error.status = 403; throw error; }
+      const pending = array(room.pendingRequests);
+      if (!pending.some(r => r.userId === targetUserId)) return;
+      collaborators = normalizeCollaborators(room.collaborators);
+      if (accepted) {
+        const owner = await transaction.get(db.collection('users').doc(room.ownerId));
+        const limit = TIERS[subscriptionFor(owner.data()).tier].editors;
+        if (collaborators.length + 1 >= limit) { const error = new Error('Room is full for your current plan tier.'); error.status = 403; throw error; }
+        collaborators.push({ userId: targetUserId, joinedAt: now(), muted: false, mutedReason: null });
+        transaction.set(db.collection('users').doc(targetUserId), { rooms: admin.firestore.FieldValue.arrayUnion(roomId) }, { merge: true });
+      }
+      transaction.update(ref, { 
+        pendingRequests: pending.filter(r => r.userId !== targetUserId),
+        pendingUserIds: admin.firestore.FieldValue.arrayRemove(targetUserId),
+        collaborators 
+      });
+    });
+    audit(accepted ? 'request.accept' : 'request.reject', actorId, targetUserId, roomId);
+    emitRoom(roomId, accepted ? 'room:member-joined' : 'room:request-rejected', { roomId, userId: targetUserId, collaborators });
+    getIO()?.to(`user:${targetUserId}`).emit(accepted ? 'room:request-accepted' : 'room:request-rejected', { roomId });
+    res.json({ ok: true });
+  } catch (error) { next(error); }
+}
+
+async function cancelJoinRequest(req, res, next) {
+  try {
+    const requestId = req.params.requestId; const actorId = req.body.userId;
+    if (!validId(requestId) || !requireUserId(actorId, res)) return res.status(400).json({ message: 'Invalid identifier.' });
+    let roomId;
+    await db.runTransaction(async transaction => {
+      const roomsSnapshot = await transaction.get(db.collection('rooms').where('pendingUserIds', 'array-contains', actorId));
+      const roomDoc = roomsSnapshot.docs.find(doc => array(doc.data().pendingRequests).some(r => r.userId === actorId && r.id === requestId));
+      if (!roomDoc) { const error = new Error('Join request not found.'); error.status = 404; throw error; }
+      roomId = roomDoc.id;
+      const pending = array(roomDoc.data().pendingRequests);
+      transaction.update(roomDoc.ref, { 
+        pendingRequests: pending.filter(r => r.userId !== actorId || r.id !== requestId),
+        pendingUserIds: admin.firestore.FieldValue.arrayRemove(actorId)
+      });
+    });
+    audit('request.cancel', actorId, null, roomId);
+    emitRoom(roomId, 'room:request-cancelled', { roomId, userId: actorId });
+    res.json({ ok: true });
+  } catch (error) { next(error); }
+}
+
+async function removeCollaborator(req, res, next) {
+  try {
+    const { roomId, userId } = req.params; const actorId = req.body.userId;
+    if (!requireUserId(actorId, res)) return;
+    if (actorId === userId) return res.status(400).json({ message: 'Room owners cannot remove themselves.' });
+    await db.runTransaction(async transaction => {
+      const ref = db.collection('rooms').doc(roomId); const doc = await transaction.get(ref);
+      if (!doc.exists) { const error = new Error('Room not found.'); error.status = 404; throw error; }
+      const room = doc.data();
+      if (room.ownerId !== actorId) { const error = new Error('Only the room owner can remove collaborators.'); error.status = 403; throw error; }
+      transaction.update(ref, { collaborators: normalizeCollaborators(room.collaborators).filter(c => c.userId !== userId) });
+      transaction.set(db.collection('users').doc(userId), { rooms: admin.firestore.FieldValue.arrayRemove(roomId) }, { merge: true });
+    });
+    audit('collaborator.remove', actorId, userId, roomId);
+    // Application socket room membership and Yjs document provider are independently cleaned up.
+    getIO()?.to(`user:${userId}`).emit('room:removed', { roomId }); disconnectRoomUser(roomId, userId);
+    emitRoom(roomId, 'room:member-removed', { roomId, userId });
+    res.json({ ok: true });
+  } catch (error) { next(error); }
+}
+
+async function setMute(req, res, next) {
+  try {
+    const { roomId, userId } = req.params; const actorId = req.body.userId; const muted = req.body.muted === true;
+    if (!requireUserId(actorId, res)) return;
+    if (actorId === userId) return res.status(400).json({ message: 'Room owners cannot mute themselves.' });
+    let collaborator;
+    await db.runTransaction(async transaction => {
+      const ref = db.collection('rooms').doc(roomId); const doc = await transaction.get(ref);
+      if (!doc.exists) { const error = new Error('Room not found.'); error.status = 404; throw error; }
+      const room = doc.data(); if (room.ownerId !== actorId) { const error = new Error('Only the room owner can mute collaborators.'); error.status = 403; throw error; }
+      const collaborators = normalizeCollaborators(room.collaborators); collaborator = collaborators.find(c => c.userId === userId);
+      if (!collaborator) { const error = new Error('Collaborator not found.'); error.status = 404; throw error; }
+      if (collaborator.mutedReason === 'planLimit') { const error = new Error('Upgrade to Pro to restore edit access for more collaborators.'); error.status = 403; throw error; }
+      collaborator.muted = muted; collaborator.mutedReason = muted ? 'host' : null; transaction.update(ref, { collaborators });
+    });
+    audit(muted ? 'collaborator.mute' : 'collaborator.unmute', actorId, userId, roomId);
+    emitRoom(roomId, 'room:member-updated', { roomId, collaborator });
+    res.json({ ok: true, collaborator });
+  } catch (error) { next(error); }
+}
+
 async function deleteRoom(req, res, next) {
   try {
-    const { roomId } = req.params;
-    const { userId } = req.query;
-
-    if (!userId) return res.status(400).json({ message: 'userId required' });
-
-    const roomRef = db.collection('rooms').doc(roomId);
-    const roomDoc = await roomRef.get();
-
-    if (!roomDoc.exists) {
-      return res.status(404).json({ message: 'Room not found' });
-    }
-
-    const roomData = roomDoc.data();
-
-    // If requester is owner, delete room + subcollections (files, messages) using batch transaction
-    if (roomData.ownerId === userId) {
-      const batch = db.batch();
-      
-      // 1. Delete all files in room
-      const filesSnapshot = await roomRef.collection('files').get();
-      filesSnapshot.forEach(doc => batch.delete(doc.ref));
-      
-      // 2. Delete all chat messages
-      const msgsSnapshot = await roomRef.collection('messages').get();
-      msgsSnapshot.forEach(doc => batch.delete(doc.ref));
-      
-      // 3. Delete room document
-      batch.delete(roomRef);
-      await batch.commit();
-    } else {
-      // If collaborator, remove user from collaborators list
-      await roomRef.update({
-        collaborators: admin.firestore.FieldValue.arrayRemove(userId)
-      });
-    }
-
-    // Remove room from user's record
-    await db.collection('users').doc(userId).update({
-      rooms: admin.firestore.FieldValue.arrayRemove(roomId)
+    const roomId = req.params.roomId; const actorId = req.query.userId; let userIds = [];
+    if (!requireUserId(actorId, res)) return;
+    await db.runTransaction(async transaction => {
+      const ref = db.collection('rooms').doc(roomId); const doc = await transaction.get(ref);
+      if (!doc.exists) { const error = new Error('Room not found.'); error.status = 404; throw error; }
+      const room = doc.data(); if (room.ownerId !== actorId) { const error = new Error('Only the room owner can delete a room.'); error.status = 403; throw error; }
+      userIds = [room.ownerId, ...normalizeCollaborators(room.collaborators).map(c => c.userId)];
+      userIds.forEach(id => transaction.set(db.collection('users').doc(id), { rooms: admin.firestore.FieldValue.arrayRemove(roomId) }, { merge: true }));
+      transaction.delete(ref);
     });
-
-    res.json({ ok: true, action: roomData.ownerId === userId ? 'deleted' : 'left' });
-  } catch (err) {
-    next(err);
-  }
+    audit('room.delete', actorId, null, roomId);
+    userIds.forEach(id => getIO()?.to(`user:${id}`).emit('room:deleted', { roomId })); closeYjsRoom(roomId); emitRoom(roomId, 'room:deleted', { roomId });
+    res.json({ ok: true, action: 'deleted' });
+  } catch (error) { next(error); }
 }
 
-module.exports = { getUserRooms, createRoom, joinRoom, deleteRoom, getRoomById };
+async function upgradeSubscription(req, res, next) {
+  try {
+    const userId = req.body.userId; if (!requireUserId(userId, res)) return; const startDate = now(); const endDate = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 90 * 86400_000));
+    const subscription = { tier: 'pro', status: 'active', startDate, endDate, invoice: { invoiceId: crypto.randomUUID(), amount: '$0.00 (Promo)', date: startDate, validUntil: endDate } };
+    await db.collection('users').doc(userId).set({ subscription }, { merge: true }); audit('subscription.upgrade', userId, null, null); getIO()?.to(`user:${userId}`).emit('subscription:updated', subscription);
+    res.json({ subscription });
+  } catch (error) { next(error); }
+}
 
+module.exports = { getUserRooms, createRoom, getRoomById, requestJoin, listRequests,fetchMyRequests, decideRequest,cancelJoinRequest , deleteRoom, removeCollaborator, setMute, upgradeSubscription, isMember, recalculateEditAccess };

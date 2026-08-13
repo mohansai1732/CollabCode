@@ -36,11 +36,5 @@ Designed for technical recruitment, CollabCode includes features to ensure authe
 *   **State Sync:** Yjs (CRDT implementation)
 *   **Styling:** Tailwind CSS / Modern CSS
 
-## 🚀 Getting Started
 
-Follow these steps to set up the project on your local machine.
-
-### 1. Clone the repository
-```bash
-git clone [https://github.com/Vinay50029/CollabCode.git](https://github.com/Vinay50029/CollabCode.git)
-cd CollabCode
+phase 1

@@ -13,6 +13,7 @@ import {
   TrendingUp,
   Activity,
   Trash2,
+  Crown,
 } from 'lucide-react';
 
 import { useState, useEffect } from 'react';
@@ -26,17 +27,19 @@ import {
 import {
   fetchUserRooms,
   createRoom,
-  fetchRoomById,
   deleteRoom,
+  fetchRoomRequests,
+  fetchRoomById,
   fetchMyRequests,
   cancelJoinRequest,
   createJoinRequest,
-  fetchRoomRequests,
+  upgradeSubscription
 } from '../services/roomsApi';
+
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState('rooms');
-  const { user } = useUser();
+  const { user, isLoaded: isUserLoaded } = useUser();
   const { signOut } = useClerk();
   const [myRooms, setMyRooms] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
@@ -49,6 +52,9 @@ export default function DashboardPage() {
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [roomInputValue, setRoomInputValue] = useState('');
   const [actionError, setActionError] = useState('');
+  const [isJoining, setIsJoining] = useState(false);
+  const [isUpgrading, setIsUpgrading] = useState(false);
+  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
 
  useEffect(() => {
 
@@ -89,24 +95,6 @@ export default function DashboardPage() {
     }
   };
 
-  const loadIncomingRequests = async () => {
-
-  try {
-
-    const requests =
-      await fetchRoomRequests(user.id);
-
-    setIncomingRequests(requests);
-
-  } catch (err) {
-
-    console.error(
-      'Failed to load incoming requests:',
-      err.message
-    );
-  }
-};
-
   const openCreateModal = () => {
     setRoomInputValue('');
     setActionError('');
@@ -127,118 +115,96 @@ export default function DashboardPage() {
       const { roomId } = await createRoom(user.id, roomInputValue, user.fullName);
       window.location.href = `/editor/${roomId}`;
     } catch (err) {
-      setActionError('Failed to create room: ' + err.message);
+      setActionError(err?.response?.data?.message || 'Failed to create room. Please try again.');
     }
   };
 
   const handleDeleteRoom = async (roomId) => {
-
   try {
-
     await deleteRoom(
       roomId,
       user.id
     );
-
     setMyRooms(prev =>
       prev.filter(
         room => room.id !== roomId
       )
     );
-
   } catch (err) {
-
     console.error(err);
-
-    alert(
-      'Failed to delete room'
-    );
+    console.error('Failed to delete room', err.message);
   }
 };
 
   const handleJoinRoomSubmit = async (e) => {
-
-  e.preventDefault();
-
-  if (!roomInputValue?.trim()) return;
-
-  try {
-
-    setActionError('');
-
-    const roomId = roomInputValue
-      .trim()
-      .toLowerCase();
-
-    // verify room exists
-    const room =
-      await fetchRoomById(roomId);
-
-    // prevent duplicate requests
-    const alreadyRequested =
-      pendingRequests.some(
-        req => req.roomId === roomId
-      );
-
-    if (alreadyRequested) {
-
-      setActionError(
-        'Request already pending'
-      );
-
+    e.preventDefault();
+    if (!isUserLoaded || !user?.id) {
+      setActionError('Your account is still loading. Please try again in a moment.');
       return;
     }
+    if (!roomInputValue?.trim() || isJoining) return;
 
-    // create pending request
-    await createJoinRequest(
-      user,
-      room
-    );
+    try {
 
-    setIsJoinModalOpen(false);
+      setActionError('');
+      setIsJoining(true);
 
-    setRoomInputValue('');
+      const roomId = roomInputValue.trim();
 
-    loadPendingRequests();
+      // prevent duplicate requests
+      const alreadyRequested =
+        pendingRequests.some(
+          req => req.roomId === roomId
+        );
 
-  } catch (err) {
+      if (alreadyRequested) {
+        setActionError( 'Request already pending' );
+        return;
+      }
+      await createJoinRequest(user, { id: roomId });
+      setIsJoinModalOpen(false);
+      setRoomInputValue('');
+      await loadPendingRequests();
+    } catch (err) {
+      console.error(err);
+      setActionError(err?.response?.data?.message || 'Failed to send join request. Please try again.');
+    } finally {
+      setIsJoining(false);
+    }
+  }
 
-  console.error(err);
-
-  setActionError(
-    err?.message ||
-    err?.response?.data?.message ||
-    'Failed to send request'
-  );
-}
-}
-
+  const handleUpgrade = async () => {
+    if (isUpgrading) return;
+    try {
+      setIsUpgrading(true);
+      setActionError('');
+      await upgradeSubscription(user.id);
+      setIsUpgradeModalOpen(false);
+    } catch (err) {
+      setActionError(err?.response?.data?.message || 'Upgrade failed. Please try again.');
+    } finally {
+      setIsUpgrading(false);
+    }
+  };
 
 
   const handleCancelRequest =
-      async (requestId) => {
-
-        try {
-
-          await cancelJoinRequest(
-            requestId
-          );
-
-          setPendingRequests(prev =>
-            prev.filter(
-              r => r.id !== requestId
-            )
-          );
-
-        } catch (err) {
-
-          console.error(err);
-
-          alert(
-            'Failed to cancel request'
-          );
-        }
-      };
+  async (requestId) => {
+    try {
+      await cancelJoinRequest(
+        requestId,
+        user.id
+      );
+      setPendingRequests(prev =>
+        prev.filter(
+          r => r.id !== requestId
+        )
+      );
+    } catch (err) {
+      console.error(err);
+      console.error('Failed to cancel request', err.message);
+    }
+  };
 
   const stats = [
     {
@@ -269,8 +235,8 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-blue-950">
-      <div className="flex">
-        <aside className="w-64 border-r border-white/10 bg-gray-900/50 backdrop-blur-xl min-h-screen p-6 flex flex-col">
+      <div className="flex min-h-screen flex-col lg:flex-row">
+        <aside className="w-full shrink-0 border-b border-white/10 bg-gray-900/50 p-4 backdrop-blur-xl lg:min-h-screen lg:w-64 lg:border-b-0 lg:border-r lg:p-6 flex flex-col">
           <Link to="/" className="flex items-center gap-2 mb-8 hover:opacity-80 transition-opacity">
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
               <Code2 className="w-6 h-6 text-white" />
@@ -334,9 +300,9 @@ export default function DashboardPage() {
           </div>
         </aside>
 
-        <main className="flex-1 p-8">
+        <main className="min-w-0 flex-1 p-4 sm:p-8">
           <div className="max-w-6xl mx-auto">
-            <div className="flex items-center justify-between mb-8">
+            <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h1 className="text-3xl text-white mb-2">
                   Welcome back, {user?.firstName || 'Developer'}
@@ -347,10 +313,18 @@ export default function DashboardPage() {
                 </p>
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => { setActionError(''); setIsUpgradeModalOpen(true); }}
+                  className="shrink-0 border-purple-400/70 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-[0_0_16px_rgba(139,92,246,0.3)]"
+                >
+                  <Crown className="h-4 w-4 text-amber-300" /> Upgrade Pro
+                </Button>
                 <Button
                   variant="outline"
                   onClick={openJoinModal}
+                  className="shrink-0"
                 >
                   <Plus className="w-5 h-5" />
 
@@ -360,6 +334,7 @@ export default function DashboardPage() {
                 <Button
                   variant="primary"
                   onClick={openCreateModal}
+                  className="shrink-0"
                 >
                   <Plus className="w-5 h-5" />
 
@@ -387,13 +362,6 @@ export default function DashboardPage() {
                   hover:shadow-[0_0_30px_rgba(59,130,246,0.15)]
                   "
                   >
-                {/* hover:-translate-y-2
-                hover:scale-[1.03]
-                hover:border-blue-500/40
-                hover:bg-gradient-to-br
-                hover:from-blue-500/10
-                hover:to-purple-500/10
-                hover:shadow-[0_0_40px_rgba(59,130,246,0.25)] */}
                 <div className="flex items-start justify-between">
 
                   <div>
@@ -415,7 +383,6 @@ export default function DashboardPage() {
                       duration-300
                       group-hover:text-white
                       ">
-                      {/* group-hover:tracking-wide */}
                       {stat.value}
                     </p>
                   </div>
@@ -428,9 +395,6 @@ export default function DashboardPage() {
                       transition-all duration-300
                       group-hover:shadow-lg
                       `}
-                      // group-hover:bg-${stat.color}-500/20
-                      // group-hover:scale-125
-                      // group-hover:rotate-6
                   >
                     <stat.icon
                       className={`
@@ -469,8 +433,9 @@ export default function DashboardPage() {
 
               ) : (
 
-                pendingRequests.map((req) => (
 
+
+                pendingRequests.map((req) => (
                   <Card
                     key={req.id}
                     glass
@@ -478,44 +443,27 @@ export default function DashboardPage() {
                     className="group"
                   >
                     <div className="flex items-center justify-between">
-
                       <div className="flex items-center gap-4 flex-1">
-
                         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
                           <Code2 className="w-6 h-6 text-white" />
                         </div>
 
                         <div className="flex-1">
-
                           <h3 className="text-white text-lg mb-1">
                             {req.roomName}
                           </h3>
 
                           <div className="flex items-center gap-4 text-sm text-gray-400">
-
-                            <span className="flex items-center gap-1">
-                              <FolderCode className="w-4 h-4" />
-                              {req.roomLanguage || 'javascript'}
-                            </span>
-
+                            {/* Display Host Name cleanly */}
                             <span className="flex items-center gap-1">
                               <Users className="w-4 h-4" />
-                              Host: {req.roomOwnerName && req.roomOwnerName !== 'Unknown' ? req.roomOwnerName : req.roomOwner || 'Unknown'}
+                              Host: {req.ownerName || req.roomOwnerName || req.roomOwner || 'Host'}
                             </span>
-
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-4 h-4" />
-                              Waiting Approval
-                            </span>
-
                           </div>
-
                         </div>
-
                       </div>
 
                       <div className="flex items-center gap-2">
-
                         <Button
                           variant="ghost"
                           className="bg-yellow-500/10 text-yellow-400 cursor-default"
@@ -526,20 +474,20 @@ export default function DashboardPage() {
                         <Button
                           variant="ghost"
                           className="group-hover:bg-red-500/10 text-red-400"
+                          // onClick={() => handleCancelRequest(req.roomId || req.id)}
                           onClick={() => handleCancelRequest(req.id)}
                         >
                           Cancel
                         </Button>
-
                       </div>
-
                     </div>
                   </Card>
-
                 ))
 
-              )
 
+
+
+              )
             ) : (
 
               myRooms.map((room) => (
@@ -683,10 +631,21 @@ export default function DashboardPage() {
                 
                 <div className="flex gap-3 mt-6">
                   <Button type="button" variant="ghost" className="flex-1" onClick={() => setIsJoinModalOpen(false)}>Cancel</Button>
-                  <Button type="submit" variant="primary" className="flex-1">Join Room</Button>
+                  <Button type="submit" variant="primary" className="flex-1" disabled={!isUserLoaded || !user?.id || isJoining}>{!isUserLoaded ? 'Loading account...' : isJoining ? 'Joining...' : 'Join Room'}</Button>
                 </div>
               </form>
             </div>
+          </div>
+        </div>
+      )}
+
+      {isUpgradeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-purple-400/30 bg-zinc-900 p-6 shadow-2xl">
+            <div className="mb-4 flex items-center gap-3 text-white"><Crown className="h-7 w-7 text-amber-300" /><h2 className="text-xl font-bold">Upgrade to Pro</h2></div>
+            <p className="text-sm text-zinc-300">Claim your 3-month free Pro trial: create up to 10 rooms and collaborate with up to 10 editors per room.</p>
+            {actionError && <p className="mt-4 text-sm text-red-400">{actionError}</p>}
+            <div className="mt-6 flex gap-3"><Button variant="ghost" className="flex-1" onClick={() => setIsUpgradeModalOpen(false)} disabled={isUpgrading}>Cancel</Button><Button className="flex-1" onClick={handleUpgrade} disabled={isUpgrading}>{isUpgrading ? 'Upgrading...' : 'Start Free Trial'}</Button></div>
           </div>
         </div>
       )}

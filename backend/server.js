@@ -1,18 +1,23 @@
-require('dotenv').config(); // Load environment variables (like PORT, URLs) from .env file
+require('dotenv').config(); 
 
-const http = require('http'); // Built-in Node.js HTTP server module
-const express = require('express'); // Express framework to build Web API routes easily
-const cors = require('cors'); // Middleware to allow frontend (browser) to connect to backend from different domains/ports
-const { Server } = require('socket.io'); // Socket.IO library for real-time double-way communication (chat, user count)
+const http = require('http'); 
+const express = require('express');
+const cors = require('cors'); 
+const { Server } = require('socket.io'); 
 const { YSocketIO } = require('y-socket.io/dist/server'); // Yjs real-time collaboration server for code synchronization
 const routes = require('./routes'); // Import all API endpoints (rooms, files)
 const { errorHandler } = require('./middleware/errorHandler'); // Centralized error handling middleware
+const { setIO } = require("./utils/socketManager"); // Utility to manage Socket.IO instance across modules
+const { validId } = require('./utils/validation');
+const { db } = require('./config/firebaseAdmin');
+const { isMember } = require('./controllers/roomController');
 
 // Initialize express application
 const app = express();
 
 // Set up frontend origin URL (e.g., http://localhost:5173 or Vercel deployment)
-const clientOrigin = process.env.CLIENT_URL || 'http://localhost:5173';
+// const clientOrigin = process.env.CLIENT_URL || 'http://localhost:5173';
+const clientOrigin = 'http://localhost:5173';
 
 /**
  * CORS Configuration: Security policy that checks if the request comes from an allowed frontend domain.
@@ -61,6 +66,7 @@ const io = new Server(server, {
   },
   transports: ['websocket', 'polling'],
 });
+setIO(io);
 
 // Initialize Yjs real-time collaborative editing server over Socket.IO
 const ysocketio = new YSocketIO(io, { gcEnabled: true });
@@ -82,12 +88,18 @@ io.on('connection', (socket) => {
   let joinedRoom = null;
 
   // Listen when a user joins a specific room
-  socket.on('room:join', (roomId) => {
+  socket.on('room:join', async ({ roomId, userId }) => {
+    if (!validId(roomId) || !validId(userId)) return socket.emit('room:error', { message: 'A valid roomId and userId are required.' });
+    const roomDoc = await db.collection('rooms').doc(roomId).get();
+    if (!roomDoc.exists || !isMember(roomDoc.data(), userId)) return socket.emit('room:error', { message: 'You are not a collaborator in this room.' });
+    socket.userId = userId;
+    socket.join(`user:${userId}`);
+    socket.roomId = roomId;
     if (joinedRoom) {
       socket.leave(`app:${joinedRoom}`);
       emitAppRoomCount(io, joinedRoom);
     }
-    joinedRoom = String(roomId || '');
+    joinedRoom = String(roomId);
     if (!joinedRoom) return;
     socket.join(`app:${joinedRoom}`);
     emitAppRoomCount(io, joinedRoom);
@@ -100,13 +112,16 @@ io.on('connection', (socket) => {
     
     const { db } = require('./config/firebaseAdmin');
     
+    if (!String(payload?.text || '').trim().slice(0, 4000)) return;
     const msg = {
       id: `${socket.id}-${Date.now()}`,
-      user: String(payload.user || 'Guest'),
+      user: String(payload.user || 'Guest').slice(0, 120),
       text: String(payload.text || ''),
       ts: Date.now(),
     };
 
+    const room = await db.collection('rooms').doc(rid).get();
+    if (!room.exists || !isMember(room.data(), socket.userId)) return;
     // Save chat message asynchronously to Cloud Firestore database
     try {
       await db.collection('rooms').doc(rid).collection('messages').add(msg);
@@ -131,12 +146,10 @@ io.on('connection', (socket) => {
 // Start listening on configured PORT (default: 5001)
 const PORT = Number(process.env.PORT) || 5001;
 
-function start() {
-  server.listen(PORT, () => {
-    console.log(`API: http://localhost:${PORT}/api`);
-    console.log(`Socket.IO + Yjs namespaces: /yjs|<roomId>`);
-  });
-}
+server.listen(PORT, () => {
+  console.log(`API server running on port ${PORT}`);
+  console.log(`Socket.IO + Yjs namespaces: /yjs|<roomId>`);
+});
 
-start();
+
 
