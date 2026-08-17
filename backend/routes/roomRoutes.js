@@ -13,6 +13,7 @@ import {
   removeCollaborator,
   setMute,
   upgradeSubscription,
+  cancelSubscription,
   leaveRoom,
   getRoomInviteInfo,
 } from '../controllers/roomController.js';
@@ -47,5 +48,7 @@ router.delete('/:roomId/collaborators/:userId', rateLimit(), removeCollaborator)
 router.patch('/:roomId/collaborators/:userId/mute', rateLimit(), setMute);
 
 router.post('/subscription/upgrade', rateLimit(), upgradeSubscription);
+
+router.post('/subscription/cancel', rateLimit(), cancelSubscription);
 
 export default router;

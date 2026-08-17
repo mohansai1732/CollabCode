@@ -2,10 +2,10 @@ import { Link } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 
-import { Code2, Plus, Users, Clock, LogOut, Home, FolderCode, TrendingUp, Activity, Trash2, Crown } from 'lucide-react';
+import { Code2, Plus, Users, Clock, LogOut, Home, FolderCode, TrendingUp, Activity, Trash2, Crown, FileText, CheckCircle2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useUser, useClerk, UserButton } from '@clerk/clerk-react';
-import { fetchUserRooms, createRoom, deleteRoom, fetchRoomRequests, fetchRoomById, fetchMyRequests, cancelJoinRequest, createJoinRequest, upgradeSubscription , exitOrDeleteRoom, leaveRoom} from '../services/roomsApi';
+import { fetchUserRooms, createRoom, deleteRoom, fetchRoomRequests, fetchRoomById, fetchMyRequests, cancelJoinRequest, createJoinRequest, upgradeSubscription, cancelSubscription, exitOrDeleteRoom, leaveRoom } from '../services/roomsApi';
 
 
 export default function DashboardPage() {
@@ -17,6 +17,7 @@ export default function DashboardPage() {
   const [showPending, setShowPending] = useState(false);
   const [incomingRequests, setIncomingRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [subscription, setSubscription] = useState({ tier: 'free', plan: 'free', status: 'active' });
 
   // Modal State
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -25,7 +26,12 @@ export default function DashboardPage() {
   const [actionError, setActionError] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [isUpgrading, setIsUpgrading] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+
+  const isAdmin = user?.publicMetadata?.role === 'admin';
+  const isPro = (subscription?.tier === 'pro' || subscription?.plan === 'pro') && subscription?.status === 'active';
 
   useEffect(() => {
     if (!user?.id) return;
@@ -37,8 +43,11 @@ export default function DashboardPage() {
   const loadRooms = async () => {
     try {
       setLoading(true);
-      const rooms = await fetchUserRooms(user.id, user.fullName);
-      setMyRooms(rooms);
+      const res = await fetchUserRooms(user.id, user.fullName);
+      const roomList = Array.isArray(res) ? res : res?.rooms || [];
+      const sub = res?.subscription;
+      setMyRooms(roomList);
+      if (sub) setSubscription(sub);
     } catch (err) {
       console.error('Failed to load rooms:', err.message);
     } finally {
@@ -76,7 +85,7 @@ export default function DashboardPage() {
       window.location.href = `/editor/${roomId}`;
     } catch (err) {
       console.error(err);
-      console.error('Failed to delete room', err.message);
+      setActionError(err?.response?.data?.message || 'Failed to create room. Please try again.');
     }
   };
 
@@ -126,16 +135,60 @@ export default function DashboardPage() {
 
   const handleUpgrade = async () => {
     if (isUpgrading) return;
+    if (!isAdmin) {
+      setActionError('This feature is currently unavailable.');
+      return;
+    }
     try {
       setIsUpgrading(true);
       setActionError('');
-      await upgradeSubscription(user.id);
+      const res = await upgradeSubscription(user.id, isAdmin);
+      if (res?.subscription) {
+        setSubscription(res.subscription);
+      }
       setIsUpgradeModalOpen(false);
     } catch (err) {
-      setActionError(err?.response?.data?.message || 'Upgrade failed. Please try again.');
+      setActionError(err?.response?.data?.message || 'Failed to start free trial. Please try again.');
     } finally {
       setIsUpgrading(false);
     }
+  };
+
+  const handleCancelSubscription = async () => {
+    if (isCancelling) return;
+    try {
+      setIsCancelling(true);
+      setActionError('');
+      const res = await cancelSubscription(user.id);
+      if (res?.subscription) {
+        setSubscription(res.subscription);
+      } else {
+        setSubscription(prev => ({ ...prev, status: 'cancelled' }));
+      }
+      setIsInvoiceModalOpen(false);
+    } catch (err) {
+      setActionError(err?.response?.data?.message || 'Failed to cancel subscription.');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const formatDate = (rawDate) => {
+    if (!rawDate) return 'N/A';
+    let d;
+    if (typeof rawDate.toDate === 'function') {
+      d = rawDate.toDate();
+    } else if (rawDate._seconds) {
+      d = new Date(rawDate._seconds * 1000);
+    } else if (typeof rawDate === 'number') {
+      d = new Date(rawDate);
+    } else if (typeof rawDate === 'string') {
+      d = new Date(rawDate);
+    } else if (rawDate instanceof Date) {
+      d = rawDate;
+    }
+    if (!d || isNaN(d.getTime())) return 'N/A';
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
   const handleCancelRequest =
@@ -173,9 +226,9 @@ export default function DashboardPage() {
 
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-blue-950">
-      <div className="flex min-h-screen flex-col lg:flex-row">
-        <aside className="w-full shrink-0 border-b border-white/10 bg-gray-900/50 p-4 backdrop-blur-xl lg:min-h-screen lg:w-64 lg:border-b-0 lg:border-r lg:p-6 flex flex-col">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-gradient-to-br from-gray-950 via-gray-900 to-blue-950">
+      <div className="flex min-h-screen lg:min-h-0 lg:h-full flex-col lg:flex-row">
+        <aside className="w-full shrink-0 border-b border-white/10 bg-gray-900/50 p-4 backdrop-blur-xl lg:h-full lg:min-h-0 lg:w-64 lg:border-b-0 lg:border-r lg:p-6 flex flex-col">
           <Link to="/" className="flex items-center gap-2 mb-8 hover:opacity-80 transition-opacity">
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
               <Code2 className="w-6 h-6 text-white" />
@@ -209,19 +262,30 @@ export default function DashboardPage() {
           </nav>
 
           <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-zinc-800">
-            <div className="flex items-center gap-3 px-2 py-1">
+            <div className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all ${
+              isPro 
+                ? 'bg-purple-950/60 border border-purple-500/30 text-white shadow-[0_0_15px_rgba(168,85,247,0.15)]' 
+                : 'px-2 py-1'
+            }`}>
               <UserButton afterSignOutUrl="/" />
               <div className="flex-1 text-left min-w-0">
-                <p className="text-white text-sm truncate font-medium"> {user?.fullName} </p>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-white text-sm truncate font-medium"> {user?.fullName} </p>
+                  {isPro && (
+                    <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded font-semibold tracking-wide">
+                      PRO
+                    </span>
+                  )}
+                </div>
                 <p className="text-zinc-400 text-xs truncate"> {user?.primaryEmailAddress?.emailAddress} </p>
               </div>
             </div>
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1 p-4 sm:p-8">
-          <div className="max-w-6xl mx-auto">
-            <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <main className="min-w-0 flex-1 p-4 sm:p-8 lg:h-full lg:overflow-hidden flex flex-col">
+          <div className="max-w-6xl mx-auto w-full flex-1 flex flex-col min-h-0">
+            <div className="mb-6 flex shrink-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
               <div>
                 <h1 className="text-3xl text-white mb-2"> Welcome back, {user?.firstName || 'Developer'} </h1>
@@ -229,13 +293,23 @@ export default function DashboardPage() {
               </div>
 
               <div className="flex flex-wrap items-center gap-3 sm:justify-end">
-                <Button
-                  variant="outline"
-                  onClick={() => { setActionError(''); setIsUpgradeModalOpen(true); }}
-                  className="shrink-0 border-purple-400/70 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-[0_0_16px_rgba(139,92,246,0.3)]" >
-                  <Crown className="h-4 w-4 text-amber-300" />
-                  Upgrade Pro
-                </Button>
+                {isPro ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => { setActionError(''); setIsInvoiceModalOpen(true); }}
+                    className="shrink-0 border-purple-500/30 text-purple-300 hover:text-white hover:bg-purple-950/40" >
+                    <FileText className="h-4 w-4 text-purple-400" />
+                    Invoice
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    onClick={() => { setActionError(''); setIsUpgradeModalOpen(true); }}
+                    className="shrink-0 border-purple-400/70 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-[0_0_16px_rgba(139,92,246,0.3)]" >
+                    <Crown className="h-4 w-4 text-amber-300" />
+                    Upgrade Pro
+                  </Button>
+                )}
 
                 <Button variant="outline" onClick={openJoinModal} className="shrink-0" >
                   <Plus className="w-5 h-5" />
@@ -249,7 +323,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-6 mb-8">
+            <div className="grid grid-cols-4 gap-6 mb-6 shrink-0">
               {stats.map((stat) => (
                 <Card key={stat.label} glass hover
                   className=" p-6 group cursor-pointer transition-all duration-300 border border-white/10 backdrop-blur-xl
@@ -270,11 +344,11 @@ export default function DashboardPage() {
               ))}
            </div>
 
-            <h2 className="text-2xl font-bold text-white mb-6">
+            <h2 className="text-2xl font-bold text-white mb-4 shrink-0">
               {activeTab === 'pending' ? 'Pending Approvals' : 'My Rooms'}
             </h2>
 
-            <div className="mb-6">
+            <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-6">
               <div className="grid gap-4">
                 {activeTab === 'pending' ? (
                   pendingRequests.length === 0 ? (
@@ -407,13 +481,117 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* Upgrade / Free Trial Modal */}
       {isUpgradeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-purple-400/30 bg-zinc-900 p-6 shadow-2xl">
-            <div className="mb-4 flex items-center gap-3 text-white"><Crown className="h-7 w-7 text-amber-300" /><h2 className="text-xl font-bold">Upgrade to Pro</h2></div>
-            <p className="text-sm text-zinc-300">Claim your 3-month free Pro trial: create up to 10 rooms and collaborate with up to 10 editors per room.</p>
-            {actionError && <p className="mt-4 text-sm text-red-400">{actionError}</p>}
-            <div className="mt-6 flex gap-3"><Button variant="ghost" className="flex-1" onClick={() => setIsUpgradeModalOpen(false)} disabled={isUpgrading}>Cancel</Button><Button className="flex-1" onClick={handleUpgrade} disabled={isUpgrading}>{isUpgrading ? 'Upgrading...' : 'Start Free Trial'}</Button></div>
+            <div className="mb-4 flex items-center gap-3 text-white">
+              <Crown className="h-7 w-7 text-amber-300" />
+              <h2 className="text-xl font-bold">{isAdmin ? 'Start Free Trial' : 'Upgrade to Pro'}</h2>
+            </div>
+
+            {isAdmin ? (
+              <p className="text-sm text-zinc-300 mb-4">
+                As an Admin, claim your <strong className="text-white">3-month free Pro trial</strong>: create unlimited rooms and collaborate with unlimited participants per room.
+              </p>
+            ) : (
+              <div className="space-y-3 mb-4">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-extrabold text-white">₹99</span>
+                  <span className="text-sm text-zinc-400">/ month</span>
+                </div>
+                <p className="text-sm text-zinc-300">
+                  Supercharge your real-time collaborative coding workflow.
+                </p>
+                <ul className="text-sm text-zinc-300 space-y-1.5 pt-2">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
+                    <span>Unlimited room creation</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
+                    <span>Unlimited users per room</span>
+                  </li>
+                </ul>
+              </div>
+            )}
+
+            {actionError && (
+              <div className="p-3 mb-4 rounded-lg bg-red-900/30 border border-red-500/30 text-red-300 text-sm">
+                {actionError}
+              </div>
+            )}
+
+            <div className="mt-6 flex gap-3">
+              <Button variant="ghost" className="flex-1" onClick={() => setIsUpgradeModalOpen(false)} disabled={isUpgrading}>
+                Cancel
+              </Button>
+              <Button className="flex-1" onClick={handleUpgrade} disabled={isUpgrading}>
+                {isUpgrading ? 'Processing...' : isAdmin ? 'Start Free Trial' : 'Pay ₹99 / Month'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Invoice & Subscription Details Modal */}
+      {isInvoiceModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-purple-500/30 bg-zinc-900 p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-3 text-white">
+                <FileText className="h-6 w-6 text-purple-400" />
+                <h2 className="text-xl font-bold">Subscription & Invoice</h2>
+              </div>
+              <button onClick={() => setIsInvoiceModalOpen(false)} className="text-zinc-500 hover:text-white text-lg">×</button>
+            </div>
+
+            <div className="space-y-3 bg-zinc-950/80 p-4 rounded-xl border border-zinc-800 text-sm">
+              <div className="flex justify-between items-center py-1 border-b border-zinc-800/60">
+                <span className="text-zinc-400">Plan:</span>
+                <span className="text-white font-semibold flex items-center gap-1.5">
+                  <Crown className="w-3.5 h-3.5 text-amber-300" /> Pro
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-zinc-800/60">
+                <span className="text-zinc-400">Start Date:</span>
+                <span className="text-zinc-200 font-mono text-xs">{formatDate(subscription?.startDate)}</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-zinc-800/60">
+                <span className="text-zinc-400">End Date:</span>
+                <span className="text-zinc-200 font-mono text-xs">{formatDate(subscription?.endDate)}</span>
+              </div>
+              <div className="flex justify-between items-center py-1">
+                <span className="text-zinc-400">Status:</span>
+                <span className="text-xs px-2 py-0.5 rounded font-medium bg-green-500/20 text-green-300 border border-green-500/30">
+                  Active
+                </span>
+              </div>
+            </div>
+
+            {actionError && (
+              <div className="p-3 mt-4 rounded-lg bg-red-900/30 border border-red-500/30 text-red-300 text-sm">
+                {actionError}
+              </div>
+            )}
+
+            <div className="mt-6 flex gap-3">
+              <Button
+                variant="ghost"
+                className="flex-1 text-red-400 hover:bg-red-900/20 hover:text-red-300 border border-red-500/20"
+                onClick={handleCancelSubscription}
+                disabled={isCancelling}
+              >
+                {isCancelling ? 'Cancelling...' : 'Cancel Subscription'}
+              </Button>
+              <Button
+                variant="ghost"
+                className="flex-1"
+                onClick={() => setIsInvoiceModalOpen(false)}
+              >
+                Close
+              </Button>
+            </div>
           </div>
         </div>
       )}

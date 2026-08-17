@@ -1,8 +1,8 @@
 import api from './api';
 
 export const fetchUserRooms = async (userId, userName) => {
-  const { data } = await api.get(`/rooms/${userId}`, { params: { userName },});
-  return data.rooms;
+  const { data } = await api.get(`/rooms/${userId}`, { params: { userName } });
+  return { rooms: data.rooms || [], subscription: data.subscription || null };
 };
 
 export const createRoom = async (userId, name, ownerName) => {
@@ -65,8 +65,13 @@ export const setCollaboratorMuted = async (roomId, targetUserId, muted, actorId)
     return data;
 };
 
-export const upgradeSubscription = async userId => {
-    const { data } = await api.post('/rooms/subscription/upgrade', { userId });
+export const upgradeSubscription = async (userId, isAdmin = false) => {
+    const { data } = await api.post('/rooms/subscription/upgrade', { userId, isAdmin });
+    return data;
+};
+
+export const cancelSubscription = async userId => {
+    const { data } = await api.post('/rooms/subscription/cancel', { userId });
     return data;
 };
 
