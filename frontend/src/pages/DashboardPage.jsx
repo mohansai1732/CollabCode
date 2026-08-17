@@ -2,39 +2,10 @@ import { Link } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 
-import {
-  Code2,
-  Plus,
-  Users,
-  Clock,
-  LogOut,
-  Home,
-  FolderCode,
-  TrendingUp,
-  Activity,
-  Trash2,
-  Crown,
-} from 'lucide-react';
-
+import { Code2, Plus, Users, Clock, LogOut, Home, FolderCode, TrendingUp, Activity, Trash2, Crown } from 'lucide-react';
 import { useState, useEffect } from 'react';
-
-import {
-  useUser,
-  useClerk,
-  UserButton,
-} from '@clerk/clerk-react';
-
-import {
-  fetchUserRooms,
-  createRoom,
-  deleteRoom,
-  fetchRoomRequests,
-  fetchRoomById,
-  fetchMyRequests,
-  cancelJoinRequest,
-  createJoinRequest,
-  upgradeSubscription
-} from '../services/roomsApi';
+import { useUser, useClerk, UserButton } from '@clerk/clerk-react';
+import { fetchUserRooms, createRoom, deleteRoom, fetchRoomRequests, fetchRoomById, fetchMyRequests, cancelJoinRequest, createJoinRequest, upgradeSubscription , exitOrDeleteRoom, leaveRoom} from '../services/roomsApi';
 
 
 export default function DashboardPage() {
@@ -56,20 +27,12 @@ export default function DashboardPage() {
   const [isUpgrading, setIsUpgrading] = useState(false);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
 
- useEffect(() => {
-
-  if (!user?.id) return;
-
-  loadRooms();
-
-  const interval = setInterval(() => {
+  useEffect(() => {
+    if (!user?.id) return;
     loadRooms();
-    loadPendingRequests();
-  }, 3000);
-
-  return () => clearInterval(interval);
-
-}, [user?.id]);
+    const interval = setInterval(() => {loadRooms(); loadPendingRequests();}, 3000);
+    return () => clearInterval(interval);
+  }, [user?.id]);
 
   const loadRooms = async () => {
     try {
@@ -88,10 +51,7 @@ export default function DashboardPage() {
       const requests = await fetchMyRequests(user.id);
       setPendingRequests(requests);
     } catch (err) {
-      console.error(
-        'Failed to load pending requests:',
-        err.message
-      );
+      console.error('Failed to load pending requests:', err.message);
     }
   };
 
@@ -115,26 +75,20 @@ export default function DashboardPage() {
       const { roomId } = await createRoom(user.id, roomInputValue, user.fullName);
       window.location.href = `/editor/${roomId}`;
     } catch (err) {
-      setActionError(err?.response?.data?.message || 'Failed to create room. Please try again.');
+      console.error(err);
+      console.error('Failed to delete room', err.message);
     }
   };
 
-  const handleDeleteRoom = async (roomId) => {
-  try {
-    await deleteRoom(
-      roomId,
-      user.id
-    );
-    setMyRooms(prev =>
-      prev.filter(
-        room => room.id !== roomId
-      )
-    );
-  } catch (err) {
-    console.error(err);
-    console.error('Failed to delete room', err.message);
-  }
-};
+  const handleDeleteRoom = async (room) => {
+    try {
+      await exitOrDeleteRoom( room, user.id );
+      setMyRooms(prev => prev.filter( r => r.id !== room.id ));
+    } catch (err) {
+      console.error(err);
+      console.error('Failed to delete room', err.message);
+    }
+  };
 
   const handleJoinRoomSubmit = async (e) => {
     e.preventDefault();
@@ -142,28 +96,25 @@ export default function DashboardPage() {
       setActionError('Your account is still loading. Please try again in a moment.');
       return;
     }
+
     if (!roomInputValue?.trim() || isJoining) return;
-
     try {
-
       setActionError('');
       setIsJoining(true);
 
       const roomId = roomInputValue.trim();
-
-      // prevent duplicate requests
-      const alreadyRequested =
-        pendingRequests.some(
-          req => req.roomId === roomId
-        );
+      const alreadyRequested = pendingRequests.some( req => req.roomId === roomId );
 
       if (alreadyRequested) {
         setActionError( 'Request already pending' );
         return;
       }
+
       await createJoinRequest(user, { id: roomId });
+
       setIsJoinModalOpen(false);
       setRoomInputValue('');
+
       await loadPendingRequests();
     } catch (err) {
       console.error(err);
@@ -187,19 +138,11 @@ export default function DashboardPage() {
     }
   };
 
-
   const handleCancelRequest =
   async (requestId) => {
     try {
-      await cancelJoinRequest(
-        requestId,
-        user.id
-      );
-      setPendingRequests(prev =>
-        prev.filter(
-          r => r.id !== requestId
-        )
-      );
+      await cancelJoinRequest( requestId, user.id );
+      setPendingRequests(prev => prev.filter( r => r.id !== requestId ));
     } catch (err) {
       console.error(err);
       console.error('Failed to cancel request', err.message);
@@ -207,31 +150,27 @@ export default function DashboardPage() {
   };
 
   const stats = [
-    {
-      label: 'Total Sessions',
+    { label: 'Total Sessions',
       value: 'stay tuned',
       icon: Activity,
-      color: 'blue',
-    },
-    {
-      label: 'Active Rooms',
+      color: 'blue'},
+
+    { label: 'Active Rooms',
       value: myRooms.length,
       icon: FolderCode,
-      color: 'purple',
-    },
-    {
-      label: 'Collaborators',
+      color: 'purple'},
+
+    { label: 'Collaborators',
       value: 'stay tuned',
       icon: Users,
-      color: 'pink',
-    },
-    {
-      label: 'Hours Coded',
+      color: 'pink' },
+
+    { label: 'Hours Coded',
       value: 'stay tuned',
       icon: TrendingUp,
-      color: 'green',
-    },
+      color: 'green' },
   ];
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-blue-950">
@@ -241,23 +180,15 @@ export default function DashboardPage() {
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
               <Code2 className="w-6 h-6 text-white" />
             </div>
-
-            <span className="text-xl text-white font-bold tracking-tight">
-              CollabCode
-            </span>
+            <span className="text-xl text-white font-bold tracking-tight"> CollabCode </span>
           </Link>
 
           <nav className="space-y-2">
             <button
               onClick={() => setActiveTab('rooms')}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all ${
-                activeTab === 'rooms'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-400 hover:bg-white/5 hover:text-white'
-              }`}
-            >
+              activeTab === 'rooms' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5 hover:text-white' }`} >
               <Home className="w-5 h-5" />
-
               <span>My Rooms</span>
             </button>
 
@@ -265,15 +196,9 @@ export default function DashboardPage() {
               onClick={() => setActiveTab('pending')}
               className={`
                 w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all
-                ${activeTab === 'pending'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-400 hover:bg-white/5 hover:text-white'
-                }
-              `}
-            >
+                ${activeTab === 'pending' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
               <Users className="w-5 h-5" />
-
-              <span>Pending Requests</span>
+              <span>Pending Approvals</span>
 
               {pendingRequests.length > 0 && (
                 <span className="ml-auto bg-red-500 text-white text-xs min-w-[20px] h-5 px-1 rounded-full flex items-center justify-center">
@@ -283,18 +208,12 @@ export default function DashboardPage() {
             </button>
           </nav>
 
-          
-
           <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-zinc-800">
             <div className="flex items-center gap-3 px-2 py-1">
               <UserButton afterSignOutUrl="/" />
               <div className="flex-1 text-left min-w-0">
-                <p className="text-white text-sm truncate font-medium">
-                  {user?.fullName}
-                </p>
-                <p className="text-zinc-400 text-xs truncate">
-                  {user?.primaryEmailAddress?.emailAddress}
-                </p>
+                <p className="text-white text-sm truncate font-medium"> {user?.fullName} </p>
+                <p className="text-zinc-400 text-xs truncate"> {user?.primaryEmailAddress?.emailAddress} </p>
               </div>
             </div>
           </div>
@@ -303,281 +222,138 @@ export default function DashboardPage() {
         <main className="min-w-0 flex-1 p-4 sm:p-8">
           <div className="max-w-6xl mx-auto">
             <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h1 className="text-3xl text-white mb-2">
-                  Welcome back, {user?.firstName || 'Developer'}
-                </h1>
 
-                <p className="text-gray-400">
-                  Ready to code together?
-                </p>
+              <div>
+                <h1 className="text-3xl text-white mb-2"> Welcome back, {user?.firstName || 'Developer'} </h1>
+                <p className="text-gray-400"> Ready to code together? </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-3 sm:justify-end">
                 <Button
                   variant="outline"
                   onClick={() => { setActionError(''); setIsUpgradeModalOpen(true); }}
-                  className="shrink-0 border-purple-400/70 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-[0_0_16px_rgba(139,92,246,0.3)]"
-                >
-                  <Crown className="h-4 w-4 text-amber-300" /> Upgrade Pro
+                  className="shrink-0 border-purple-400/70 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-[0_0_16px_rgba(139,92,246,0.3)]" >
+                  <Crown className="h-4 w-4 text-amber-300" />
+                  Upgrade Pro
                 </Button>
-                <Button
-                  variant="outline"
-                  onClick={openJoinModal}
-                  className="shrink-0"
-                >
-                  <Plus className="w-5 h-5" />
 
+                <Button variant="outline" onClick={openJoinModal} className="shrink-0" >
+                  <Plus className="w-5 h-5" />
                   Join Room
                 </Button>
 
-                <Button
-                  variant="primary"
-                  onClick={openCreateModal}
-                  className="shrink-0"
-                >
+                <Button variant="primary" onClick={openCreateModal} className="shrink-0" >
                   <Plus className="w-5 h-5" />
-
                   Create Room
                 </Button>
               </div>
             </div>
 
             <div className="grid grid-cols-4 gap-6 mb-8">
-            {stats.map((stat) => (
-              <Card
-                key={stat.label}
-                glass
-                hover
-                className="
-                  p-6
-                  group
-                  cursor-pointer
-                  transition-all
-                  duration-300
-                  border border-white/10
-                  backdrop-blur-xl
-                  hover:border-blue-500/40
-                  hover:bg-white/[0.07]
-                  hover:shadow-[0_0_30px_rgba(59,130,246,0.15)]
-                  "
-                  >
-                <div className="flex items-start justify-between">
+              {stats.map((stat) => (
+                <Card key={stat.label} glass hover
+                  className=" p-6 group cursor-pointer transition-all duration-300 border border-white/10 backdrop-blur-xl
+                  hover:border-blue-500/40 hover:bg-white/[0.07] hover:shadow-[0_0_30px_rgba(59,130,246,0.15)] " >
+                  <div className="flex items-start justify-between">
 
-                  <div>
-                    <p className="
-                      text-gray-400
-                      text-sm
-                      mb-1
-                      transition-all
-                      duration-300
-                      // group-hover:text-blue-300
-                    ">
-                      {stat.label}
-                    </p>
+                    <div>
+                      <p className=" text-gray-400 text-sm mb-1 transition-all duration-300 // group-hover:text-blue-300 "> {stat.label} </p>
+                      <p className="text-3xl text-white transition-all duration-300 group-hover:text-white">{stat.value}</p>
+                    </div>
 
-                    <p className="
-                      text-3xl
-                      text-white
-                      transition-all
-                      duration-300
-                      group-hover:text-white
-                      ">
-                      {stat.value}
-                    </p>
-                  </div>
-
-                  <div
-                    className={`
-                      w-12 h-12 rounded-xl
-                      bg-${stat.color}-500/10
-                      flex items-center justify-center
-                      transition-all duration-300
-                      group-hover:shadow-lg
-                      `}
-                  >
-                    <stat.icon
-                      className={`
-                        w-6 h-6
-                        text-${stat.color}-400
-                        transition-all duration-300
-                        group-hover:scale-110
-                      `}
-                    />
-                  </div>
-
-                </div>
-              </Card>
-            ))}
-          </div>
+                    <div
+                      className={`w-12 h-12 rounded-xl bg-${stat.color}-500/10 flex items-center justify-center transition-all duration-300 group-hover:shadow-lg`}>
+                      <stat.icon className={`w-6 h-6 text-${stat.color}-400 transition-all duration-300 group-hover:scale-110`}/>
+                    </div>
+                 </div>
+                </Card>
+              ))}
+           </div>
 
             <h2 className="text-2xl font-bold text-white mb-6">
-              {activeTab === 'pending'
-                ? 'Pending Requests'
-                : 'My Rooms'}
+              {activeTab === 'pending' ? 'Pending Approvals' : 'My Rooms'}
             </h2>
 
-        <div className="mb-6">
+            <div className="mb-6">
+              <div className="grid gap-4">
+                {activeTab === 'pending' ? (
+                  pendingRequests.length === 0 ? (
+                    <h3 className="text-gray-400 text-center"> No Pending Approvals </h3> ) : (
 
-          <div className="grid gap-4">
+                    pendingRequests.map((req) => (
+                      <Card key={req.id} glass hover className="group" >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4 flex-1">
+                            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
+                              <Code2 className="w-6 h-6 text-white" />
+                            </div>
 
-            {activeTab === 'pending' ? (
-
-              pendingRequests.length === 0 ? (
-
-                <Card glass className="p-8 text-center">
-                  <p className="text-gray-400">
-                    No pending requests
-                  </p>
-                </Card>
-
-              ) : (
-
-
-
-                pendingRequests.map((req) => (
-                  <Card
-                    key={req.id}
-                    glass
-                    hover
-                    className="group"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4 flex-1">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
-                          <Code2 className="w-6 h-6 text-white" />
-                        </div>
-
-                        <div className="flex-1">
-                          <h3 className="text-white text-lg mb-1">
-                            {req.roomName}
-                          </h3>
-
-                          <div className="flex items-center gap-4 text-sm text-gray-400">
-                            {/* Display Host Name cleanly */}
-                            <span className="flex items-center gap-1">
-                              <Users className="w-4 h-4" />
-                              Host: {req.ownerName || req.roomOwnerName || req.roomOwner || 'Host'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          className="bg-yellow-500/10 text-yellow-400 cursor-default"
-                        >
-                          Pending
-                        </Button>
-
-                        <Button
-                          variant="ghost"
-                          className="group-hover:bg-red-500/10 text-red-400"
-                          // onClick={() => handleCancelRequest(req.roomId || req.id)}
-                          onClick={() => handleCancelRequest(req.id)}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  </Card>
-                ))
-
-
-
-
-              )
-            ) : (
-
-              myRooms.map((room) => (
-
-                <Link
-                  key={room.id}
-                  to={`/editor/${room.id}`}
-                >
-
-                  <Card glass hover className="group">
-
-                    <div className="flex items-center justify-between">
-
-                      <div className="flex items-center gap-4 flex-1">
-
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                          <Code2 className="w-6 h-6 text-white" />
-                        </div>
-
-                        <div className="flex-1">
-
-                          <h3 className="text-white text-lg mb-1">
-                            {room.name}
-                          </h3>
-
-                          <div className="flex items-center gap-4 text-sm text-gray-400">
-
-                            <span className="flex items-center gap-1">
-                              <span className="text-zinc-500 font-mono text-xs">CODE:</span>
-                              <code className="bg-white/10 px-2 py-0.5 rounded text-amber-300 font-mono font-bold text-xs tracking-wider">{room.id}</code>
-                            </span>
-
-                            <span className="flex items-center gap-1">
-                              <FolderCode className="w-4 h-4" />
-                              {room.language}
-                            </span>
-
-                            <span className="flex items-center gap-1">
-                              <Users className="w-4 h-4" />
-                              {room.members} members
-                            </span>
-
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-4 h-4" />
-                              {room.lastActive}
-                            </span>
-
+                            <div className="flex-1">
+                              <h3 className="text-white text-lg mb-1"> {req.roomName} </h3>
+                              <div className="flex items-center gap-4 text-sm text-gray-400">
+                                <span className="flex items-center gap-1"><Users className="w-4 h-4" />
+                                  Host: {req.ownerName || req.roomOwnerName || req.roomOwner || 'Host'}
+                                </span>
+                              </div>
+                            </div>
                           </div>
 
+                          <div className="flex items-center gap-2">
+                            <Button variant="ghost" className="bg-yellow-500/10 text-yellow-400 cursor-default" >
+                              Waiting for approval
+                            </Button>
+
+                            <Button variant="ghost" className="group-hover:bg-red-500/10 text-red-400"
+                              onClick={() => handleCancelRequest(req.id)} > 
+                              Cancel
+                            </Button>
+                          </div>
                         </div>
+                      </Card>
+                    ))
+                  )
+                ) : (
+                  myRooms.length === 0 ? (
+                    <h3 className="text-gray-400 text-center"> No Rooms Available </h3> ) : (
+                      myRooms.map((room) => (
+                        <Link key={room.id} to={`/editor/${room.id}`} >
+                          <Card glass hover className="group">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4 flex-1">
+                                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                  <Code2 className="w-6 h-6 text-white" />
+                                </div>
 
-                      </div>
+                                <div className="flex-1">
+                                  <h3 className="text-white text-lg mb-1"> {room.name} </h3>
+                                  <div className="flex items-center gap-4 text-sm text-gray-400">
+                                    <span className="flex items-center gap-1">
+                                      <span className="text-zinc-500 font-mono text-xs">CODE:</span>
+                                      <code className="bg-white/10 px-2 py-0.5 rounded text-amber-300 font-mono font-bold text-xs tracking-wider">{room.id}</code>
+                                    </span>
+                                    <span className="flex items-center gap-1"><FolderCode className="w-4 h-4" />{room.language}</span>
+                                    <span className="flex items-center gap-1"><Users className="w-4 h-4" />{room.members} members</span>
+                                    <span className="flex items-center gap-1"><Clock className="w-4 h-4" />{room.lastActive}</span>
+                                  </div>
+                                </div>
+                              </div>
 
-                      <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2">
+                                <Button variant="ghost" className="group-hover:bg-red-500/10 text-red-400"
+                                  onClick={(e) => { e.preventDefault(); handleDeleteRoom(room); }} >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
 
-                        <Button
-                          variant="ghost"
-                          className="group-hover:bg-red-500/10 text-red-400"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleDeleteRoom(room.id);
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-
-                        <Button
-                          variant="ghost"
-                          className="group-hover:bg-white/10"
-                        >
-                          Open
-                        </Button>
-
-                      </div>
-
-                    </div>
-
-                  </Card>
-
-                </Link>
-
-              ))
-
-            )}
-
-          </div>
-
-        </div>
-
-        </div>
+                                <Button variant="ghost" className="group-hover:bg-white/10" > Open </Button>
+                              </div>
+                            </div>
+                          </Card>
+                       </Link>
+                     ))  
+                   ))}
+              </div>
+           </div>
+         </div>
         </main>
       </div>
 
@@ -590,15 +366,11 @@ export default function DashboardPage() {
               <p className="text-zinc-400 text-sm mb-6">Give your project a name to get started.</p>
               
               <form onSubmit={handleCreateRoomSubmit}>
-                <input
-                  type="text"
-                  autoFocus
-                  value={roomInputValue}
+                <input type="text" autoFocus value={roomInputValue}
                   onChange={(e) => setRoomInputValue(e.target.value)}
                   placeholder="e.g. My Awesome Project"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-white outline-none focus:border-blue-500 transition-colors mb-2"
-                />
-                {actionError && <p className="text-red-400 text-sm mb-4">{actionError}</p>}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-white outline-none focus:border-blue-500 transition-colors mb-2" />
+                  {actionError && <p className="text-red-400 text-sm mb-4">{actionError}</p>}
                 
                 <div className="flex gap-3 mt-6">
                   <Button type="button" variant="ghost" className="flex-1" onClick={() => setIsCreateModalOpen(false)}>Cancel</Button>
@@ -619,15 +391,11 @@ export default function DashboardPage() {
               <p className="text-zinc-400 text-sm mb-6">Paste the 6-character room ID to join your team.</p>
               
               <form onSubmit={handleJoinRoomSubmit}>
-                <input
-                  type="text"
-                  autoFocus
-                  value={roomInputValue}
+                <input type="text" autoFocus value={roomInputValue}
                   onChange={(e) => setRoomInputValue(e.target.value)}
                   placeholder="Room ID"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-white font-mono outline-none focus:border-blue-500 transition-colors mb-2"
-                />
-                {actionError && <p className="text-red-400 text-sm mb-4">{actionError}</p>}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-white font-mono outline-none focus:border-blue-500 transition-colors mb-2" />
+                  {actionError && <p className="text-red-400 text-sm mb-4">{actionError}</p>}
                 
                 <div className="flex gap-3 mt-6">
                   <Button type="button" variant="ghost" className="flex-1" onClick={() => setIsJoinModalOpen(false)}>Cancel</Button>
@@ -649,6 +417,7 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

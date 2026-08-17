@@ -1,6 +1,6 @@
-const express = require('express');
-
-const {
+import express from 'express';
+import { rateLimit } from '../middleware/rateLimit.js';
+import {
   getUserRooms,
   createRoom,
   deleteRoom,
@@ -13,9 +13,10 @@ const {
   removeCollaborator,
   setMute,
   upgradeSubscription,
-} = require('../controllers/roomController');
+  leaveRoom,
+  getRoomInviteInfo,
+} from '../controllers/roomController.js';
 
-const { rateLimit } = require('../middleware/rateLimit');
 
 const router = express.Router();
 
@@ -23,7 +24,7 @@ router.get('/find/:roomId', getRoomById);
 
 router.get('/:userId', getUserRooms);
 
-router.post('/', createRoom);
+router.post('/', rateLimit(), createRoom);
 
 router.post('/join', rateLimit(), requestJoin);
 
@@ -31,11 +32,15 @@ router.get('/:roomId/requests', listRequests);
 
 router.get('/my-requests/:userId', fetchMyRequests);
 
+router.get('/invite/:roomId', getRoomInviteInfo);
+
 router.delete('/my-requests/:requestId', rateLimit(), cancelJoinRequest);
 
 router.post('/:roomId/requests/:userId', rateLimit(), decideRequest);
 
-router.delete('/:roomId', deleteRoom);
+router.delete('/:roomId', rateLimit(), deleteRoom);
+
+router.delete('/:roomId/leave', rateLimit(), leaveRoom);
 
 router.delete('/:roomId/collaborators/:userId', rateLimit(), removeCollaborator);
 
@@ -43,4 +48,4 @@ router.patch('/:roomId/collaborators/:userId/mute', rateLimit(), setMute);
 
 router.post('/subscription/upgrade', rateLimit(), upgradeSubscription);
 
-module.exports = router;
+export default router;

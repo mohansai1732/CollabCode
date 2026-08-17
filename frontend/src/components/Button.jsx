@@ -4,6 +4,7 @@ function cn(...parts) {
 
 const variantClasses = {
   default: 'bg-blue-600 text-white hover:bg-blue-500 shadow-sm',
+  primary: 'bg-blue-600 text-white hover:bg-blue-500 shadow-sm',
   secondary: 'bg-zinc-700 text-white hover:bg-zinc-600',
   ghost: 'bg-transparent text-zinc-200 hover:bg-white/10',
   outline: 'border border-zinc-600 bg-transparent text-white hover:bg-zinc-800',

@@ -1,7 +1,7 @@
-const crypto = require('crypto');
-const { db, admin } = require('../config/firebaseAdmin');
-const { getIO, disconnectRoomUser, closeYjsRoom } = require('../utils/socketManager');
-const { validId, requireUserId } = require('../utils/validation');
+import crypto from 'crypto';
+import admin, { db } from '../config/firebaseAdmin.js';
+import { getIO, disconnectRoomUser, closeYjsRoom } from '../sockets/socketManager.js';
+import { validId, requireUserId } from '../utils/validation.js';
 
 const TIERS = { free: { rooms: 3, editors: 3 }, pro: { rooms: 10, editors: 10 } };
 const now = () => admin.firestore.Timestamp.now();
@@ -17,14 +17,14 @@ function subscriptionFor(user) {
   return { tier: expired ? 'free' : (subscription.tier || 'free'), status: expired ? 'expired' : (subscription.status || 'active') };
 }
 
-function isMember(room, userId) {
+export function isMember(room, userId) {
   return room.ownerId === userId || normalizeCollaborators(room.collaborators).some(c => c.userId === userId);
 }
 
 function publicRoom(doc) { return { id: doc.id, ...doc.data(), collaborators: normalizeCollaborators(doc.data().collaborators) }; }
 function audit(action, actorId, targetId, roomId) { console.info(JSON.stringify({ audit: action, actorId, targetId: targetId || null, roomId, timestamp: new Date().toISOString() })); }
 
-async function recalculateEditAccess(roomRef, room, transaction) {
+export async function recalculateEditAccess(roomRef, room, transaction) {
   const owner = await transaction.get(db.collection('users').doc(room.ownerId));
   const tier = subscriptionFor(owner.data()).tier;
   const limit = TIERS[tier].editors;
@@ -39,7 +39,7 @@ async function recalculateEditAccess(roomRef, room, transaction) {
 
 function emitRoom(roomId, event, payload) { getIO()?.to(`app:${roomId}`).emit(event, payload); }
 
-async function getUserRooms(req, res, next) {
+export async function getUserRooms(req, res, next) {
   try {
     const userId = req.params.userId;
     if (!requireUserId(userId, res)) return;
@@ -52,7 +52,7 @@ async function getUserRooms(req, res, next) {
   } catch (error) { next(error); }
 }
 
-async function createRoom(req, res, next) {
+export async function createRoom(req, res, next) {
   try {
     const userId = req.body.userId;
     if (!requireUserId(userId, res)) return;
@@ -76,7 +76,7 @@ async function createRoom(req, res, next) {
   } catch (error) { next(error); }
 }
 
-async function getRoomById(req, res, next) {
+export async function getRoomById(req, res, next) {
   try {
     const roomId = req.params.roomId;
     if (!validId(roomId)) return res.status(400).json({ message: 'Invalid room ID.' });
@@ -89,7 +89,7 @@ async function getRoomById(req, res, next) {
   } catch (error) { next(error); }
 }
 
-async function requestJoin(req, res, next) {
+export async function requestJoin(req, res, next) {
   try {
     const userId = req.body?.userId;
     const roomId = typeof req.body?.roomId === 'string' ? req.body.roomId.trim() : '';
@@ -115,8 +115,7 @@ async function requestJoin(req, res, next) {
   } catch (error) { next(error); }
 }
 
-
-async function listRequests(req, res, next) {
+export async function listRequests(req, res, next) {
   try {
     const roomId = req.params.roomId; const doc = await db.collection('rooms').doc(roomId).get();
     if (!doc.exists) return res.status(404).json({ message: 'Room not found.' });
@@ -127,7 +126,7 @@ async function listRequests(req, res, next) {
   } catch (error) { next(error); }
 }
 
-async function fetchMyRequests(req, res, next) {
+export async function fetchMyRequests(req, res, next) {
   try {
     const userId = req.params.userId;
 
@@ -165,7 +164,7 @@ async function fetchMyRequests(req, res, next) {
   }
 }
 
-async function decideRequest(req, res, next) {
+export async function decideRequest(req, res, next) {
   try {
     const { roomId, userId: targetUserId } = req.params; const actorId = req.body.userId; const accepted = req.body.accept === true;
     if (!validId(roomId) || !validId(targetUserId) || !requireUserId(actorId, res)) return res.status(400).json({ message: 'Invalid identifier.' });
@@ -198,7 +197,7 @@ async function decideRequest(req, res, next) {
   } catch (error) { next(error); }
 }
 
-async function cancelJoinRequest(req, res, next) {
+export async function cancelJoinRequest(req, res, next) {
   try {
     const requestId = req.params.requestId; const actorId = req.body.userId;
     if (!validId(requestId) || !requireUserId(actorId, res)) return res.status(400).json({ message: 'Invalid identifier.' });
@@ -220,28 +219,30 @@ async function cancelJoinRequest(req, res, next) {
   } catch (error) { next(error); }
 }
 
-async function removeCollaborator(req, res, next) {
+export async function removeCollaborator(req, res, next) {
   try {
     const { roomId, userId } = req.params; const actorId = req.body.userId;
     if (!requireUserId(actorId, res)) return;
     if (actorId === userId) return res.status(400).json({ message: 'Room owners cannot remove themselves.' });
+    let ownerName = 'Host';
     await db.runTransaction(async transaction => {
       const ref = db.collection('rooms').doc(roomId); const doc = await transaction.get(ref);
       if (!doc.exists) { const error = new Error('Room not found.'); error.status = 404; throw error; }
       const room = doc.data();
+      ownerName = room.ownerName || 'Host';
       if (room.ownerId !== actorId) { const error = new Error('Only the room owner can remove collaborators.'); error.status = 403; throw error; }
       transaction.update(ref, { collaborators: normalizeCollaborators(room.collaborators).filter(c => c.userId !== userId) });
       transaction.set(db.collection('users').doc(userId), { rooms: admin.firestore.FieldValue.arrayRemove(roomId) }, { merge: true });
     });
     audit('collaborator.remove', actorId, userId, roomId);
     // Application socket room membership and Yjs document provider are independently cleaned up.
-    getIO()?.to(`user:${userId}`).emit('room:removed', { roomId }); disconnectRoomUser(roomId, userId);
+    getIO()?.to(`user:${userId}`).emit('room:removed', { roomId, hostName: ownerName }); disconnectRoomUser(roomId, userId, ownerName);
     emitRoom(roomId, 'room:member-removed', { roomId, userId });
     res.json({ ok: true });
   } catch (error) { next(error); }
 }
 
-async function setMute(req, res, next) {
+export async function setMute(req, res, next) {
   try {
     const { roomId, userId } = req.params; const actorId = req.body.userId; const muted = req.body.muted === true;
     if (!requireUserId(actorId, res)) return;
@@ -262,7 +263,7 @@ async function setMute(req, res, next) {
   } catch (error) { next(error); }
 }
 
-async function deleteRoom(req, res, next) {
+export async function deleteRoom(req, res, next) {
   try {
     const roomId = req.params.roomId; const actorId = req.query.userId; let userIds = [];
     if (!requireUserId(actorId, res)) return;
@@ -280,7 +281,7 @@ async function deleteRoom(req, res, next) {
   } catch (error) { next(error); }
 }
 
-async function upgradeSubscription(req, res, next) {
+export async function upgradeSubscription(req, res, next) {
   try {
     const userId = req.body.userId; if (!requireUserId(userId, res)) return; const startDate = now(); const endDate = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 90 * 86400_000));
     const subscription = { tier: 'pro', status: 'active', startDate, endDate, invoice: { invoiceId: crypto.randomUUID(), amount: '$0.00 (Promo)', date: startDate, validUntil: endDate } };
@@ -289,4 +290,80 @@ async function upgradeSubscription(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { getUserRooms, createRoom, getRoomById, requestJoin, listRequests,fetchMyRequests, decideRequest,cancelJoinRequest , deleteRoom, removeCollaborator, setMute, upgradeSubscription, isMember, recalculateEditAccess };
+export async function leaveRoom(req, res, next) {
+  try {
+    const roomId = req.params.roomId;
+    const userId = req.query.userId;
+
+    if (!requireUserId(userId, res)) return;
+
+    await db.runTransaction(async transaction => {
+      const ref = db.collection('rooms').doc(roomId);
+      const doc = await transaction.get(ref);
+
+      if (!doc.exists) {
+        const error = new Error('Room not found.');
+        error.status = 404;
+        throw error;
+      }
+
+      const room = doc.data();
+
+      if (room.ownerId === userId) {
+        const error = new Error('Room owners cannot leave their own room.');
+        error.status = 400;
+        throw error;
+      }
+
+      const collaborators = normalizeCollaborators(room.collaborators);
+
+      transaction.update(ref, {
+        collaborators: collaborators.filter(c => c.userId !== userId)
+      });
+
+      transaction.set(
+        db.collection('users').doc(userId),
+        { rooms: admin.firestore.FieldValue.arrayRemove(roomId) },
+        { merge: true }
+      );
+    });
+
+    audit('room.leave', userId, null, roomId);
+
+    getIO()?.to(`user:${userId}`).emit('room:removed', { roomId });
+    disconnectRoomUser(roomId, userId);
+    emitRoom(roomId, 'room:member-removed', { roomId, userId });
+
+    res.json({ ok: true, action: 'left' });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Fetch basic metadata for invite links / validation
+export const getRoomInviteInfo = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const roomRef = db.collection('rooms').doc(roomId);
+    const snap = await roomRef.get();
+
+    if (!snap.exists) {
+      return res.status(404).json({ message: 'Room not found' });
+    }
+
+    const data = snap.data();
+
+    return res.json({
+      room: {
+        id: snap.id,
+        name: data.name,
+        language: data.language,
+        ownerId: data.ownerId,
+        ownerName: data.ownerName || 'Host'
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching invite room info:', err);
+    return res.status(500).json({ message: 'Failed to fetch room metadata' });
+  }
+};

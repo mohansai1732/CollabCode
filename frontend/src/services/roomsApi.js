@@ -50,6 +50,11 @@ export const rejectJoinRequest = async (request, actorId) => {
     return data;
 };
 
+export const fetchInviteRoom = async (roomId) => {
+  const { data } = await api.get(`/rooms/invite/${roomId}`);
+  return data.room;
+};
+
 export const removeCollaborator = async (roomId, targetUserId, actorId) => {
     const { data } = await api.delete(`/rooms/${roomId}/collaborators/${targetUserId}`, { data: { userId: actorId } });
     return data;
@@ -63,4 +68,20 @@ export const setCollaboratorMuted = async (roomId, targetUserId, muted, actorId)
 export const upgradeSubscription = async userId => {
     const { data } = await api.post('/rooms/subscription/upgrade', { userId });
     return data;
+};
+
+export const leaveRoom = async (roomId, userId) => {
+  const { data } = await api.delete(`/rooms/${roomId}/leave`, { params: { userId } });
+  return data;
+};
+
+export const exitOrDeleteRoom = async (room, userId) => {
+  const roomId = room.id || room.roomId;
+  const isHost = room.createdBy === userId || room.hostId === userId || room.ownerId === userId;
+
+  if (isHost) {
+    return await deleteRoom(roomId, userId);
+  } else {
+    return await leaveRoom(roomId, userId);
+  }
 };

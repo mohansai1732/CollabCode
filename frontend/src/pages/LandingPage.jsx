@@ -57,8 +57,8 @@ export default function LandingPage() {
           </Link>
 
           <div className="flex items-center gap-4">
-            <SignedOut><SignInButton mode="modal"><Button variant="ghost">Login</Button></SignInButton></SignedOut>
-            <SignedOut><SignUpButton mode="modal"><Button variant="primary">Sign Up</Button></SignUpButton></SignedOut>
+            <SignedOut><SignInButton mode="modal"><span><Button variant="ghost">Sign In</Button></span></SignInButton></SignedOut>
+            <SignedOut><SignUpButton mode="modal"><span><Button variant="primary">Sign Up</Button></span></SignUpButton></SignedOut>
             <SignedIn><UserButton /></SignedIn>
           </div>
         </div>
@@ -79,7 +79,7 @@ export default function LandingPage() {
 
         <div className="flex items-center justify-center gap-4 mb-16">
           <Button variant="secondary" size="lg"><Terminal className="w-5 h-5" />Editor Workspace</Button>
-          <SignedOut><SignInButton mode="modal"><Button variant="primary" size="lg">Dashboard </Button> </SignInButton></SignedOut>
+          <SignedOut><SignInButton mode="modal"><span><Button variant="primary" size="lg">Dashboard </Button></span></SignInButton></SignedOut>
           <SignedIn> <Link to="/dashboard"><Button variant="primary" size="lg"> Dashboard </Button></Link></SignedIn>
         </div>
 

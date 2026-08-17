@@ -1,28 +1,34 @@
-const admin = require('firebase-admin');
+import admin from 'firebase-admin';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
-let db;
-
-try {
-  if (admin.apps.length === 0) {
+if (!admin.apps.length) {
+  try {
     let serviceAccount;
-    
-    // Use environment variable if available, otherwise use serviceAccountKey.json
+
     if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
       serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
     } else {
-      serviceAccount = require('../serviceAccountKey.json');
+      // Read local JSON file safely in ES Module context
+      const keyPath = resolve('serviceAccountKey.json');
+      serviceAccount = JSON.parse(readFileSync(keyPath, 'utf8'));
     }
 
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
+    admin.initializeApp({ 
+      credential: admin.credential.cert(serviceAccount) 
     });
+
     console.log('Firebase Admin initialized successfully.');
+
+  } catch (err) {
+    console.error('Firebase Admin initialization error:', err.message);
+    throw new Error(`Failed to initialize Firebase Admin: ${err.message}`);
   }
-  
-  db = admin.firestore();
-} catch (err) {
-  console.error("Firebase Admin initialization error:", err.message);
 }
 
-module.exports = { admin, db };
+const db = admin.firestore();
+db.settings({ ignoreUndefinedProperties: true });
 
+// Exports both named (db, admin) and a default export for flexibility
+export { admin, db };
+export default admin;

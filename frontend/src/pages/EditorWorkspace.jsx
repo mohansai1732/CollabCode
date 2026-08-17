@@ -1,53 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useUser, useClerk } from '@clerk/clerk-react';
-import { Link, useParams } from 'react-router-dom';
-
 import Editor from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import * as Y from 'yjs';
 
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useUser, useClerk } from '@clerk/clerk-react';
+import { Link, useParams } from 'react-router-dom';
 import { MonacoBinding } from '../y-monaco-local.js';
-
-import {
-  Play,
-  MessageSquare,
-  Send,
-  Users,
-  LogOut,
-  ChevronLeft,
-  Lock,
-  Clock
-} from 'lucide-react';
-
-import {
-  Panel,
-  PanelGroup,
-  PanelResizeHandle,
-} from 'react-resizable-panels';
-
+import { Play, MessageSquare, Send, Users, LogOut, ChevronLeft, Lock, Clock } from 'lucide-react';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useYjsRoom } from '@/hooks/useYjsRoom';
 import { useChatSocket } from '@/hooks/useChatSocket';
-
-import {
-  fetchRoomRequests,
-  approveJoinRequest,
-  rejectJoinRequest,
-  fetchRoomById,
-  fetchMyRequests,
-  createJoinRequest,
-  cancelJoinRequest,
-  removeCollaborator,
-} from '@/services/roomsApi';
-
-// import { executeCode } from '@/services/pistonApi';
-
 import { getLanguageOption , LANGUAGE_OPTIONS } from '@/utils/languages';
-
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 
-const COLORS = ['#38bdf8', '#a78bfa', '#f472b6', '#34d399', '#fbbf24'];
+import { fetchRoomRequests, approveJoinRequest, rejectJoinRequest, fetchRoomById, fetchMyRequests, createJoinRequest, cancelJoinRequest, removeCollaborator, setCollaboratorMuted } from '@/services/roomsApi';
 
+const COLORS = ['#38bdf8', '#a78bfa', '#f472b6', '#34d399', '#fbbf24'];
 const ACTIVE_FILENAME = 'main.js';
 
 export default function EditorWorkspace() {
@@ -62,13 +31,64 @@ export default function EditorWorkspace() {
     }
   }, [isLoaded, user]);
 
-  // Access check state
+  // Access check & room states
   const [room, setRoom] = useState(null);
   const [checkingAccess, setCheckingAccess] = useState(true);
   const [hasAccess, setHasAccess] = useState(false);
   const [myRequest, setMyRequest] = useState(null);
   const [isSendingRequest, setIsSendingRequest] = useState(false);
   const [requestError, setRequestError] = useState('');
+  const [isMuted, setIsMuted] = useState(false);
+  const [removedInfo, setRemovedInfo] = useState({ isRemoved: false, hostName: '' });
+  const [actionLoading, setActionLoading] = useState(false);
+
+  // Workspace, editor & chat states
+  const [language, setLanguage] = useState('python');
+  const [output, setOutput] = useState('');
+  const [outputErr, setOutputErr] = useState('');
+  const [running, setRunning] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [awareUsers, setAwareUsers] = useState([]);
+  const [chatOpen, setChatOpen] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(true);
+  const [showPending, setShowPending] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [showRemoveModal, setShowRemoveModal] = useState(false);
+  const [selectedCollaborator, setSelectedCollaborator] = useState(null);
+
+  // Component Refs
+  const editorRef = useRef(null);
+  const bindingRef = useRef(null);
+  const modelRef = useRef(null);
+  const dbFileRef = useRef(null);
+  const hydratedRef = useRef(false);
+  const chatEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
+  const isNearBottomRef = useRef(true);
+
+  // Track chat scroll position to prevent auto-scrolling when user is reading older messages
+  const handleChatScroll = useCallback((e) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    isNearBottomRef.current = scrollHeight - scrollTop - clientHeight <= 100;
+  }, []);
+
+  // Helper to check if a specific collaborator is muted
+  const isUserMuted = useCallback((targetUserId) => {
+    if (!targetUserId) return false;
+    if (targetUserId === user?.id && isMuted) return true;
+    const aware = awareUsers.find(u => u.userId === targetUserId);
+    if (aware && aware.muted === true) return true;
+    if (room?.collaborators && Array.isArray(room.collaborators)) {
+      const match = room.collaborators.find(c => {
+        const cId = typeof c === 'string' ? c : c.userId;
+        return cId === targetUserId;
+      });
+      if (match && typeof match === 'object' && match.muted === true) {
+        return true;
+      }
+    }
+    return false;
+  }, [room?.collaborators, user?.id, isMuted, awareUsers]);
 
   // 2. Access Check: Verify if user is collaborator, or if request is pending
   useEffect(() => {
@@ -97,6 +117,14 @@ export default function EditorWorkspace() {
         if (isCollaborator) {
           setHasAccess(true);
           setCheckingAccess(false);
+          const myCollab = roomData.collaborators?.find(c =>
+            (typeof c === 'string' ? c : c.userId) === user.id
+          );
+          if (myCollab && typeof myCollab === 'object' && myCollab.muted === true) {
+            setIsMuted(true);
+          } else {
+            setIsMuted(false);
+          }
         } else {
           // Fetch user's requests
           const myRequests = await fetchMyRequests(user.id);
@@ -124,7 +152,7 @@ export default function EditorWorkspace() {
 
   // 3. Polling: Auto-transition when approved by host
   useEffect(() => {
-    if (hasAccess || !user || !roomId || !myRequest) return;
+    if (hasAccess || !user || !roomId || !myRequest || removedInfo.isRemoved) return;
 
     const interval = setInterval(async () => {
       try {
@@ -145,7 +173,7 @@ export default function EditorWorkspace() {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [hasAccess, user?.id, roomId, myRequest]);
+  }, [hasAccess, user?.id, roomId, myRequest, removedInfo.isRemoved]);
 
   const handleSendRequest = async () => {
     if (!user || !room) return;
@@ -187,23 +215,135 @@ export default function EditorWorkspace() {
     }
   };
 
-  // remove collaborator from room
-  const handleRemoveCollaborator = async () => {
+  // Real-time socket callbacks
+  const handleMemberUpdated = useCallback(({ roomId: eventRoomId, collaborator }) => {
+    if ((eventRoomId && eventRoomId !== roomId) || !collaborator) return;
+    setRoom(prev => {
+      if (!prev) return prev;
+      const currentCollaborators = Array.isArray(prev.collaborators) ? prev.collaborators : [];
+      let found = false;
+      const updated = currentCollaborators.map(c => {
+        const cId = typeof c === 'string' ? c : c.userId;
+        if (cId === collaborator.userId) {
+          found = true;
+          return { ...(typeof c === 'object' ? c : { userId: cId }), ...collaborator };
+        }
+        return typeof c === 'object' ? c : { userId: c };
+      });
+      if (!found) {
+        updated.push({ ...collaborator });
+      }
+      return {
+        ...prev,
+        collaborators: updated
+      };
+    });
+
+    setAwareUsers(prev => prev.map(u => u.userId === collaborator.userId ? { ...u, muted: collaborator.muted === true } : u));
+
+    if (collaborator.userId === user?.id) {
+      const muted = collaborator.muted === true;
+      setIsMuted(muted);
+      if (editorRef.current) {
+        editorRef.current.updateOptions({
+          readOnly: muted,
+          domReadOnly: muted,
+        });
+      }
+    }
+  }, [roomId, user?.id]);
+
+  const handleMemberRemoved = useCallback(({ roomId: eventRoomId, userId: removedUserId }) => {
+    if (eventRoomId && eventRoomId !== roomId) return;
+    setRoom(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        collaborators: (prev.collaborators || []).filter(c =>
+          (typeof c === 'string' ? c : c.userId) !== removedUserId
+        )
+      };
+    });
+    setAwareUsers(prev => prev.filter(u => u.userId !== removedUserId));
+  }, [roomId]);
+
+  const handleRoomRemoved = useCallback((data) => {
+    if (data?.roomId && data.roomId !== roomId) return;
+    const hostName = data?.hostName || room?.ownerName || 'Host';
+    setRemovedInfo({
+      isRemoved: true,
+      hostName,
+    });
+    setHasAccess(false);
+    setIsMuted(false);
+  }, [roomId, room?.ownerName]);
+
+  // Host action: Toggle Mute / Unmute
+  const handleToggleMute = async (targetUserId, muteStatus) => {
+    if (!user || !roomId || actionLoading) return;
     try {
+      setActionLoading(true);
+      await setCollaboratorMuted(roomId, targetUserId, muteStatus, user.id);
+      setRoom(prev => {
+        if (!prev) return prev;
+        const currentCollaborators = Array.isArray(prev.collaborators) ? prev.collaborators : [];
+        let found = false;
+        const updated = currentCollaborators.map(c => {
+          const cId = typeof c === 'string' ? c : c.userId;
+          if (cId === targetUserId) {
+            found = true;
+            return { ...(typeof c === 'object' ? c : { userId: cId }), muted: muteStatus, mutedReason: muteStatus ? 'host' : null };
+          }
+          return typeof c === 'object' ? c : { userId: c };
+        });
+        if (!found) {
+          updated.push({ userId: targetUserId, muted: muteStatus, mutedReason: muteStatus ? 'host' : null });
+        }
+        return {
+          ...prev,
+          collaborators: updated
+        };
+      });
+      setAwareUsers(prev => prev.map(u => u.userId === targetUserId ? { ...u, muted: muteStatus } : u));
+    } catch (err) {
+      console.error('Failed to toggle mute status:', err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Host action: Remove collaborator from room
+  const handleRemoveCollaborator = async () => {
+    if (!selectedCollaborator || !user || !roomId || actionLoading) return;
+    try {
+      setActionLoading(true);
       await removeCollaborator(
         roomId,
         selectedCollaborator.userId,
         user.id,
       );
+      setRoom(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          collaborators: (prev.collaborators || []).filter(c =>
+            (typeof c === 'string' ? c : c.userId) !== selectedCollaborator.userId
+          )
+        };
+      });
+      setAwareUsers(prev => prev.filter(u => u.userId !== selectedCollaborator.userId));
       setShowRemoveModal(false);
       setSelectedCollaborator(null);
-
     } catch (err) {
-      console.error(err);
+      console.error('Failed to remove collaborator:', err);
+    } finally {
+      setActionLoading(false);
     }
   };
 
-  const { doc, provider, sources, langs, synced } = useYjsRoom(hasAccess ? roomId : null);
+  const { doc, provider, sources, langs, synced } = useYjsRoom(
+    hasAccess && !removedInfo.isRemoved ? roomId : null
+  );
 
   // Stable Naming from Clerk
   const displayName = useMemo(() => {
@@ -224,28 +364,39 @@ export default function EditorWorkspace() {
     return COLORS[Math.abs(hash) % COLORS.length];
   }, [displayName]);
 
-  const { peerCount, messages, sendMessage } = useChatSocket(hasAccess ? roomId : null, displayName, user?.id);
+  const { peerCount, messages, sendMessage } = useChatSocket(
+    hasAccess && !removedInfo.isRemoved ? roomId : null,
+    displayName,
+    user?.id,
+    {
+      onMemberUpdated: handleMemberUpdated,
+      onMemberRemoved: handleMemberRemoved,
+      onRoomRemoved: handleRoomRemoved,
+    }
+  );
 
-  const [language, setLanguage] = useState('python');
-  const [output, setOutput] = useState('');
-  const [outputErr, setOutputErr] = useState('');
-  const [running, setRunning] = useState(false);
-  const [chatInput, setChatInput] = useState('');
-  const [awareUsers, setAwareUsers] = useState([]);
-  const [chatOpen, setChatOpen] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(true);
-  const [showPending, setShowPending] = useState(false);
-  const [pendingRequests, setPendingRequests] = useState([]);
-  const [showRemoveModal, setShowRemoveModal] = useState(false);
-  const [selectedCollaborator, setSelectedCollaborator] = useState(null);
+  // Auto-scroll chat to bottom when messages update
+  useEffect(() => {
+    if (!chatOpen || !chatContainerRef.current) return;
+    const container = chatContainerRef.current;
+    const lastMsg = messages[messages.length - 1];
+    const isOwnMessage = lastMsg && lastMsg.user === displayName;
 
+    if (isNearBottomRef.current || isOwnMessage) {
+      requestAnimationFrame(() => {
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
+      });
+    }
+  }, [messages, chatOpen, displayName]);
 
-  const editorRef = useRef(null);
-  const bindingRef = useRef(null);
-  const modelRef = useRef(null);
-  const dbFileRef = useRef(null);
-  const hydratedRef = useRef(false);
-  const chatEndRef = useRef(null);
+  const handleSendMessage = () => {
+    if (!chatInput.trim()) return;
+    isNearBottomRef.current = true;
+    sendMessage(chatInput);
+    setChatInput('');
+  };
 
   // Hydration from Firestore
   useEffect(() => {
@@ -304,22 +455,28 @@ export default function EditorWorkspace() {
     };
   }, [roomId]);
 
-// refreshpedningrequests
-    useEffect(() => {
+  // Refresh pending requests
+  useEffect(() => {
+    if (!user?.id || !room || room.ownerId !== user.id || !hasAccess || removedInfo.isRemoved) return;
 
-      if (!user?.id) return;
+    loadPendingRequests();
 
+    const interval = setInterval(() => {
       loadPendingRequests();
+    }, 3000);
 
-      const interval = setInterval(() => {
+    return () => clearInterval(interval);
+  }, [user?.id, room?.ownerId, roomId, hasAccess, removedInfo.isRemoved]);
 
-        loadPendingRequests();
-
-      }, 3000);
-
-      return () => clearInterval(interval);
-
-    }, [user?.id]);
+  // Sync Monaco editor options when mute status changes
+  useEffect(() => {
+    if (editorRef.current) {
+      editorRef.current.updateOptions({
+        readOnly: isMuted,
+        domReadOnly: isMuted,
+      });
+    }
+  }, [isMuted]);
 
   // Awareness (Collaborators)
   useEffect(() => {
@@ -328,8 +485,9 @@ export default function EditorWorkspace() {
       id: user.id, // Store Clerk user ID for de-duplication
       name: displayName,
       color: userColor,
+      muted: isMuted,
     });
-  }, [provider, displayName, userColor, user]);
+  }, [provider, displayName, userColor, user, isMuted]);
 
   useEffect(() => {
     if (!provider) return;
@@ -344,6 +502,7 @@ export default function EditorWorkspace() {
               userId: uId,
               name: st.user.name,
               color: st.user.color,
+              muted: st.user.muted === true,
             });
           }
         }
@@ -355,10 +514,8 @@ export default function EditorWorkspace() {
     return () => provider.awareness.off('change', upd);
   }, [provider]);
 
-
   const bindEditor = useCallback((editor, monacoNs) => {
     if (!doc || !sources || !provider) return;
-
 
     bindingRef.current?.destroy();
     
@@ -368,55 +525,44 @@ export default function EditorWorkspace() {
 
     const uri = monacoNs.Uri.parse(`file:///${roomId}/${ACTIVE_FILENAME}`);
 
-    // monaco editor sync relies on the model URI to identify documents, so we create a unique URI for this room and file. This also allows Monaco to manage the editor state (like undo/redo) correctly across sessions.
-// let model = monacoNs.editor.getModel(uri);
+    const existingModel = monacoNs.editor.getModel(uri);
+    if (existingModel) {
+      existingModel.dispose();
+    }
 
-// if (!model) {
-//   model = monacoNs.editor.createModel('', lang, uri);
-// }
+    // Create fresh synced model
+    const model = monacoNs.editor.createModel(
+      ytext.toString(),
+      lang,
+      uri
+    );
 
-// modelRef.current = model;
+    modelRef.current = model;
+    editor.setModel(model);
 
-// editor.setModel(model);
-// Dispose stale Monaco model
-const existingModel =
-  monacoNs.editor.getModel(uri);
+    // Clear stale diagnostics
+    monacoNs.editor.setModelMarkers(
+      model,
+      'owner',
+      []
+    );
 
-if (existingModel) {
-  existingModel.dispose();
-}
+    editor.updateOptions({
+      readOnly: isMuted,
+      domReadOnly: isMuted,
+    });
 
-// Create fresh synced model
-const model = monacoNs.editor.createModel(
-  ytext.toString(),
-  lang,
-  uri
-);
+    const binding = new MonacoBinding(
+      monacoNs,
+      ytext,
+      model,
+      new Set(),
+      provider.awareness
+    );
 
-modelRef.current = model;
-
-editor.setModel(model);
-
-// Clear stale diagnostics
-monacoNs.editor.setModelMarkers(
-  model,
-  'owner',
-  []
-);
-
-
-const binding = new MonacoBinding(
-  monacoNs,
-  ytext,
-  model,
-  new Set(),
-  provider.awareness
-);
-
-bindingRef.current = binding;
-editorRef.current = editor;
-  }, [doc, sources, provider, langs, language, roomId]);
-
+    bindingRef.current = binding;
+    editorRef.current = editor;
+  }, [doc, sources, provider, langs, language, roomId, isMuted]);
 
   const handleLanguageSelect = (next) => {
     setLanguage(next);
@@ -506,6 +652,16 @@ editorRef.current = editor;
     }
   };
 
+  const inviteUrl = `${window.location.origin}/join/${roomId}`;
+
+  const handleCopyInvite = async () => {
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+    } catch (err) {
+      console.error('Failed to copy invite link:', err);
+    }
+  };
+
   const handleRun = async () => {
     try {
       setRunning(true);
@@ -559,6 +715,27 @@ editorRef.current = editor;
   };
 
 
+
+  if (removedInfo.isRemoved) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-zinc-950 text-white p-4">
+        <Card className="max-w-md w-full p-8 text-center" glass>
+          <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-6 text-red-500">
+            <LogOut className="w-8 h-8" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Removed from Room</h2>
+          <p className="text-zinc-400 mb-6">
+            You were removed from the room by <strong className="text-white">{removedInfo.hostName}</strong>.
+          </p>
+          <Link to="/dashboard" className="w-full block">
+            <Button variant="primary" className="w-full">
+              Return to Dashboard
+            </Button>
+          </Link>
+        </Card>
+      </div>
+    );
+  }
 
   if (checkingAccess || (hasAccess && isSyncing)) {
     return (
@@ -682,22 +859,36 @@ editorRef.current = editor;
           <code className="bg-zinc-800 px-2 py-1 rounded text-amber-200 text-sm font-mono tracking-wider font-bold">{roomId}</code>
         </div>
 
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => setShowPending(!showPending)}
-          className="gap-2 relative"
-        >
-          <Users className="w-4 h-4" />
+        {room.ownerId == user.id && (
+          <>
+          <Button
+      variant="secondary"
+      size="sm"
+      onClick={handleCopyInvite}
+    >
+      Invite
+    </Button>
 
-          Requests
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowPending(!showPending)}
+            className="gap-2 relative"
+          >
+            <Users className="w-4 h-4" />
 
-          {pendingRequests.length > 0 && (
-            <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center font-semibold">
-              {pendingRequests.length}
-            </span>
-          )}
-        </Button>
+            Requests
+
+            {pendingRequests.length > 0 && (
+              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center font-semibold">
+                {pendingRequests.length}
+              </span>
+            )}
+          </Button>
+          </>
+        )}
+
+        
 
         {showPending && (
           <div className="absolute top-14 left-0 w-70 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden z-50">
@@ -785,6 +976,11 @@ editorRef.current = editor;
         )}
 
         <div className="ml-auto flex items-center gap-3">
+          {isMuted && (
+            <span className="px-2.5 py-1 text-xs rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1 font-medium">
+              🔇 Read-only (Muted by Host)
+            </span>
+          )}
           {!chatOpen && (
             <Button
               variant="secondary"
@@ -804,8 +1000,6 @@ editorRef.current = editor;
           >
             {LANGUAGE_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
-
-
 
           <Button size="sm" onClick={handleRun} disabled={running} className="gap-2 bg-green-600 hover:bg-green-700 border-none">
             <Play className="w-4 h-4" />
@@ -834,90 +1028,77 @@ editorRef.current = editor;
             <div className="flex-1 p-4 overflow-y-auto">
               <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">Collaborators ({awareUsers.length})</h3>
               <div className="space-y-3">
-                {awareUsers.map((u) => (
-                  <div key={u.id} className="flex items-center gap-3 group">
-                    <div className="relative">
-                      <div 
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-lg"
-                        style={{ background: `linear-gradient(135deg, ${u.color}, ${u.color}dd)` }}
-                      >
-                        {u.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 border-2 border-zinc-900 rounded-full" />
-                    </div>
-                    <span className="text-sm text-zinc-300">
-                      {u.name}
-                      {u.name === displayName && <span className="ml-2 text-[10px] text-zinc-500">(You)</span>}
-                    </span>
-                      <div className="relative group">
-                      {/* <button className="text-zinc-400 hover:text-white px-2 cursor-pointer">
-                        ⋮
-                      </button> */}
+                {awareUsers.map((u) => {
+                  const isTargetMuted = isUserMuted(u.userId);
+                  const isHost = room?.ownerId === user?.id;
+                  const isSelf = u.userId === user?.id || u.name === displayName;
 
-                      <div className="absolute right-0 top-full mt-1 w-40 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-                        <button className="w-full text-left px-4 py-2 text-sm hover:bg-zinc-800 rounded-t-lg">
-                          👤 Profile
-                        </button>
-
-                        {room.ownerId === user.id && u.userId !== user.id && (
-                        
-                        <><button className="w-full text-left px-4 py-2 text-sm hover:bg-zinc-800">
-                            🔇 Mute
-                          </button><button
-                            onClick={() => { setSelectedCollaborator(u); setShowRemoveModal(true); } }
-                            className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-600 hover:text-white rounded-b-lg">
-                              🗑 Remove
-                            </button></>
-                        )}
-                      
-                    
-                        {showRemoveModal && (
-                          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999]">
-                            <div className="w-[420px] bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl">
-
-                              <div className="p-6 border-b border-zinc-800">
-                                <h2 className="text-xl font-semibold text-white">
-                                  Remove Collaborator
-                                </h2>
-
-                                <p className="text-zinc-400 mt-2">
-                                  Are you sure you want to remove
-                                  <span className="text-white font-semibold">
-                                    {" "}{selectedCollaborator?.name}
-                                  </span>
-                                  {" "}from this room?
-                                </p>
-                              </div>
-
-                              <div className="flex justify-end gap-3 p-5">
-
-                                <button
-                                  onClick={() => {
-                                    setShowRemoveModal(false);
-                                    setSelectedCollaborator(null);
-                                  }}
-                                  className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
-                                >
-                                  Cancel
-                                </button>
-
-                                <button
-                                  onClick={handleRemoveCollaborator}
-                                  className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white"
-                                >
-                                  Remove
-                                </button>
-
-                              </div>
-
-                            </div>
+                  return (
+                    <div key={u.id || u.userId} className="flex items-center justify-between gap-3 group">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="relative shrink-0">
+                          <div 
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-lg"
+                            style={{ background: `linear-gradient(135deg, ${u.color}, ${u.color}dd)` }}
+                          >
+                            {u.name.charAt(0).toUpperCase()}
                           </div>
-                        )}
+                          <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 border-2 border-zinc-900 rounded-full" />
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-sm text-zinc-300 truncate flex items-center gap-1.5">
+                            {u.name}
+                            {isSelf && <span className="text-[10px] text-zinc-500">(You)</span>}
+                            {u.userId === room?.ownerId && (
+                              <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1 rounded border border-blue-500/30">Host</span>
+                            )}
+                          </span>
+                          {isTargetMuted && (
+                            <span className="text-[10px] text-amber-400 flex items-center gap-0.5">
+                              🔇 Muted
+                            </span>
+                          )}
+                        </div>
                       </div>
+
+                      {/* Host action menu */}
+                      {isHost && !isSelf && (
+                        <div className="relative group/menu">
+                          <button
+                            type="button"
+                            className="text-zinc-400 hover:text-white px-2 py-1 rounded hover:bg-zinc-800 transition cursor-pointer text-xs font-bold"
+                            title="Collaborator Options"
+                          >
+                            ⋮
+                          </button>
+
+                          <div className="absolute right-0 top-full mt-1 w-36 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl opacity-0 invisible group-hover/menu:opacity-100 group-hover/menu:visible transition-all duration-200 z-50 overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleMute(u.userId, !isTargetMuted)}
+                              disabled={actionLoading}
+                              className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition cursor-pointer ${
+                                isTargetMuted
+                                  ? 'bg-blue-600/20 text-blue-400 font-medium hover:bg-blue-600/30'
+                                  : 'text-zinc-200 hover:bg-zinc-800'
+                              }`}
+                            >
+                              {isTargetMuted ? '🔊 Unmute' : '🔇 Mute'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedCollaborator(u); setShowRemoveModal(true); }}
+                              disabled={actionLoading}
+                              className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-600 hover:text-white flex items-center gap-2 transition border-t border-zinc-800 cursor-pointer"
+                            >
+                              🗑 Remove
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -936,10 +1117,12 @@ editorRef.current = editor;
               options={{
                 minimap: { enabled: false },
                 fontSize: 14,
-                padding: { top: 20 },
+                padding: { top: 28, bottom: 20 },
                 smoothScrolling: true,
                 cursorSmoothCaretAnimation: "on",
                 fontFamily: "'JetBrains Mono', monospace",
+                readOnly: isMuted,
+                domReadOnly: isMuted,
               }}
             />
           </div>
@@ -958,7 +1141,11 @@ editorRef.current = editor;
                   <button onClick={() => setChatOpen(false)} className="text-zinc-500 hover:text-white">×</button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div 
+                  ref={chatContainerRef}
+                  onScroll={handleChatScroll}
+                  className="flex-1 overflow-y-auto p-4 space-y-4 chat-scrollbar"
+                >
                   {messages.map((m, i) => (
                     <div key={i} className={`flex flex-col ${m.user === displayName ? 'items-end' : 'items-start'}`}>
                       <span className="text-[10px] text-zinc-500 mb-1">{m.user}</span>
@@ -977,14 +1164,13 @@ editorRef.current = editor;
                     <input
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && (sendMessage(chatInput), setChatInput(''))}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                       placeholder="Type a message..."
                       className="flex-1 bg-transparent text-sm outline-none px-2"
                     />
                     <button 
-                      onClick={() => (sendMessage(chatInput), setChatInput(''))}
-                      className="p-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
-                    >
+                      onClick={handleSendMessage}
+                      className="p-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
                       <Send className="w-4 h-4" />
                     </button>
                   </div>
@@ -1008,6 +1194,44 @@ editorRef.current = editor;
           {!output && !outputErr && <p className="text-zinc-600 italic">Ready to run code...</p>}
         </div>
       </div>
+
+      {/* Confirmation Modal for Removing Collaborator */}
+      {showRemoveModal && selectedCollaborator && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
+          <div className="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-xl font-semibold text-white">
+                Remove Collaborator
+              </h2>
+              <p className="text-zinc-400 mt-2 text-sm">
+                Are you sure you want to remove <strong className="text-white">{selectedCollaborator?.name}</strong> from this room? They will lose access immediately.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 p-4 bg-zinc-900/80">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRemoveModal(false);
+                  setSelectedCollaborator(null);
+                }}
+                disabled={actionLoading}
+                className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-300 font-medium transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRemoveCollaborator}
+                disabled={actionLoading}
+                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-sm text-white font-medium transition disabled:opacity-50 cursor-pointer"
+              >
+                {actionLoading ? 'Removing...' : 'Remove'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

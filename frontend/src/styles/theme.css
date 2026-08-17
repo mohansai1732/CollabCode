@@ -179,3 +179,40 @@
     line-height: 1.5;
   }
 }
+
+/* Custom subtle dark scrollbar for chat panel */
+.chat-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.chat-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 9999px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* Monaco read-only overlay message fix - prevent clipping at top of editor */
+.monaco-editor .monaco-editor-overlaymessage {
+  margin-top: 6px !important;
+  z-index: 1000 !important;
+}
+
+.monaco-editor .monaco-editor-overlaymessage .message {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7) !important;
+  border-radius: 4px !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  font-size: 12px !important;
+}
