@@ -4,6 +4,8 @@ import {
   getAdminStats, 
   getAllRooms, 
   deleteRoomAdmin, 
+  getAllUsers,
+  deleteUserAdmin,
   updateSubscription 
 } from '../controllers/adminController.js';
 
@@ -15,6 +17,9 @@ router.use(requireAuth, requireAdmin);
 router.get('/stats', getAdminStats);
 router.get('/rooms', getAllRooms);
 router.delete('/rooms/:roomId', deleteRoomAdmin);
-router.post('/subscription', updateSubscription);
+
+router.get('/users', getAllUsers);
+router.delete('/users/:userId', deleteUserAdmin);
+router.post('/users/:userId/subscription', updateSubscription);
 
 export default router;

@@ -1,4 +1,4 @@
-@import "tailwindcss" source(none);
+@import "tailwindcss";
 
 @source "../**/*.{js,jsx,ts,tsx}";
 

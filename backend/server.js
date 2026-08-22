@@ -1,14 +1,15 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import http from 'http'; 
+import http from 'http';
 import express from 'express';
-import cors from 'cors'; 
-import routes from './routes/index.js'; 
+import cors from 'cors';
+import routes from './routes/index.js';
 import adminRoutes from './routes/adminRoutes.js';
+import { clerkMiddleware } from '@clerk/express';
 
 import { Server } from 'socket.io';
-import { YSocketIO } from 'y-socket.io/dist/server'; 
+import { YSocketIO } from 'y-socket.io/dist/server';
 import { errorHandler } from './middleware/errorHandler.js';
 import { setIO } from './sockets/socketManager.js';
 import { validId } from './utils/validation.js';
@@ -48,6 +49,35 @@ app.use(
 
 // Enable JSON body parsing for incoming requests (limit 4mb for code files)
 app.use(express.json({ limit: '4mb' }));
+
+// Attach Clerk authentication middleware safely
+app.use((req, res, next) => {
+  // Extract and decode JWT Bearer token if present
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        req.auth = {
+          userId: payload.sub || payload.userId || payload.id,
+          sessionClaims: payload,
+          ...payload
+        };
+      }
+    } catch (e) {
+      // Ignore malformed JWT
+    }
+  }
+
+  // If Clerk Secret Key is provided, use official clerkMiddleware
+  if (process.env.CLERK_SECRET_KEY) {
+    return clerkMiddleware()(req, res, next);
+  }
+
+  next();
+});
 
 // Attach REST API routes (placed AFTER cors and express.json)
 app.use('/api/admin', adminRoutes);
@@ -92,7 +122,7 @@ io.on('connection', (socket) => {
   // Listen when a user joins a specific room
   socket.on('room:join', async ({ roomId, userId }) => {
     if (!validId(roomId) || !validId(userId)) return socket.emit('room:error', { message: 'A valid roomId and userId are required.' });
-    
+
     socket.userId = String(userId);
     socket.roomId = String(roomId);
     socket.join(`user:${userId}`);
@@ -121,7 +151,7 @@ io.on('connection', (socket) => {
   socket.on('chat:message', async (payload) => {
     const rid = String(payload?.roomId || joinedRoom || '');
     if (!rid) return;
-    
+
     const text = String(payload?.text || '').trim().slice(0, 4000);
     if (!text) return;
 

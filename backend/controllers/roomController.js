@@ -16,6 +16,23 @@ const normalizeCollaborators = value => array(value).map(entry => typeof entry =
   ? { userId: entry, joinedAt: now(), muted: false, mutedReason: null }
   : { muted: false, mutedReason: null, ...entry });
 
+export function generateRoomCode(length = 6) {
+  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+  const numbers = '0123456789';
+  const allChars = uppercase + lowercase + numbers;
+
+  while (true) {
+    let code = '';
+    for (let i = 0; i < length; i++) {
+      code += allChars[crypto.randomInt(0, allChars.length)];
+    }
+    if (length < 3 || (/[A-Z]/.test(code) && /[a-z]/.test(code) && /[0-9]/.test(code))) {
+      return code;
+    }
+  }
+}
+
 export function isProUser(userData) {
   if (!userData) return false;
   const subscription = userData.subscription || {};
@@ -171,12 +188,12 @@ export async function createRoom(req, res, next) {
       }
     }
 
-    const roomId = crypto.randomBytes(4).toString('hex').slice(0, 6);
+    const roomId = generateRoomCode(6);
     await db.runTransaction(async transaction => {
       const latestUserDoc = await transaction.get(userRef);
       const latestData = latestUserDoc.exists ? latestUserDoc.data() : {};
       const latestIsPro = isProUser(latestData);
-      
+
       if (!latestIsPro) {
         const owned = await countCreatedRooms(userId, latestData);
         if (owned >= TIERS.free.rooms) {

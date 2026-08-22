@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { useAuth } from '@clerk/clerk-react';
+import { useAuth, useUser } from '@clerk/clerk-react';
 
 import LandingPage from '@/pages/LandingPage';
 import DashboardPage from '@/pages/DashboardPage';
@@ -14,13 +14,14 @@ import AdminRoute from '@/components/AdminRoute';
 
 import { setClerkTokenGetter } from '@/services/api';
 
-// Bridge component to dynamically attach Clerk token getter to Axios
+// Bridge component to dynamically attach Clerk token & user getters to Axios
 function AxiosAuthBridge() {
   const { getToken } = useAuth();
+  const { user } = useUser();
 
   useEffect(() => {
-    setClerkTokenGetter(getToken);
-  }, [getToken]);
+    setClerkTokenGetter(getToken, () => user);
+  }, [getToken, user]);
 
   return null;
 }

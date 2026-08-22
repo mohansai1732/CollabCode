@@ -1,45 +1,219 @@
-// const { db } = require('../config/firebaseAdmin');
+import { db } from '../config/firebaseAdmin.js';
 
-// function valid(value) { return typeof value === 'string' && value.trim().length > 0; }
+function valid(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
 
-// async function listFiles(req, res, next) {
-//   try {
-//     const { roomId } = req.query;
-//     if (!valid(roomId)) return res.status(400).json({ message: 'roomId query required.' });
-//     const snapshot = await db.collection('rooms').doc(roomId).collection('files').orderBy('updatedAt', 'desc').get();
-//     res.json({ files: snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) });
-//   } catch (error) { next(error); }
-// }
+const EXT_TO_LANG = {
+  js: 'javascript',
+  jsx: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  py: 'python',
+  java: 'java',
+  cpp: 'cpp',
+  c: 'c',
+  cs: 'csharp',
+  html: 'html',
+  css: 'css',
+  json: 'json',
+  md: 'markdown',
+  sql: 'sql',
+  rust: 'rust',
+  rs: 'rust',
+  go: 'go',
+  php: 'php',
+  rb: 'ruby',
+};
 
-// async function createFile(req, res, next) {
-//   try {
-//     const { roomId, filename, language, content } = req.body;
-//     if (!valid(roomId) || !valid(filename)) return res.status(400).json({ message: 'roomId and filename are required.' });
-//     const ref = db.collection('rooms').doc(roomId).collection('files').doc();
-//     const file = { roomId, filename: filename.trim(), language: language || 'javascript', content: content || '', createdAt: new Date(), updatedAt: new Date() };
-//     await ref.set(file); res.status(201).json({ file: { id: ref.id, ...file } });
-//   } catch (error) { next(error); }
-// }
+function detectLanguage(filename, explicitLang) {
+  if (explicitLang && explicitLang !== 'auto') return explicitLang;
+  if (!filename) return 'javascript';
+  const parts = filename.split('.');
+  if (parts.length > 1) {
+    const ext = parts.pop().toLowerCase();
+    if (EXT_TO_LANG[ext]) return EXT_TO_LANG[ext];
+  }
+  return 'javascript';
+}
 
-// async function updateFile(req, res, next) {
-//   try {
-//     const { id } = req.params; const { roomId, filename, language, content } = req.body;
-//     if (!valid(roomId) || !valid(id)) return res.status(400).json({ message: 'roomId and file id are required.' });
-//     const update = { updatedAt: new Date() };
-//     if (filename !== undefined) update.filename = String(filename).trim();
-//     if (language !== undefined) update.language = language;
-//     if (content !== undefined) update.content = content;
-//     const ref = db.collection('rooms').doc(roomId).collection('files').doc(id); await ref.update(update);
-//     const doc = await ref.get(); res.json({ file: { id: doc.id, ...doc.data() } });
-//   } catch (error) { next(error); }
-// }
+export async function listFiles(req, res, next) {
+  try {
+    const { roomId } = req.query;
+    if (!valid(roomId)) {
+      return res.status(400).json({ message: 'roomId query parameter is required.' });
+    }
 
-// async function deleteFile(req, res, next) {
-//   try {
-//     const { id } = req.params; const { roomId } = req.query;
-//     if (!valid(roomId) || !valid(id)) return res.status(400).json({ message: 'roomId and file id are required.' });
-//     await db.collection('rooms').doc(roomId).collection('files').doc(id).delete(); res.json({ ok: true });
-//   } catch (error) { next(error); }
-// }
+    const snapshot = await db.collection('files').where('roomId', '==', roomId).get();
 
-// module.exports = { listFiles, createFile, updateFile, deleteFile };
+    if (snapshot.empty) {
+      // Create initial default file for room if none exist
+      let defaultLang = 'python';
+      let defaultFilename = 'main.py';
+
+      try {
+        const roomDoc = await db.collection('rooms').doc(roomId).get();
+        if (roomDoc.exists) {
+          const roomData = roomDoc.data();
+          if (roomData?.language) {
+            defaultLang = roomData.language;
+            defaultFilename = defaultLang === 'javascript' ? 'main.js' : `main.${defaultLang === 'python' ? 'py' : 'txt'}`;
+          }
+        }
+      } catch (err) {
+        console.warn('Could not read room language for default file:', err.message);
+      }
+
+      const fileRef = db.collection('files').doc();
+      const initialFile = {
+        roomId,
+        filename: defaultFilename,
+        language: defaultLang,
+        content: '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await fileRef.set(initialFile);
+      return res.json({ files: [{ id: fileRef.id, ...initialFile }] });
+    }
+
+    const files = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    // Sort in memory by createdAt ascending so the primary file is first
+    files.sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeA - timeB;
+    });
+
+    return res.json({ files });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createFile(req, res, next) {
+  try {
+    const { roomId, filename, language, content } = req.body;
+    if (!valid(roomId) || !valid(filename)) {
+      return res.status(400).json({ message: 'roomId and filename are required.' });
+    }
+
+    const cleanFilename = filename.trim();
+
+    // Validate that filename includes an extension
+    const parts = cleanFilename.split('.');
+    if (parts.length < 2 || !parts[parts.length - 1].trim()) {
+      return res.status(400).json({ 
+        message: 'Please include a valid file extension (e.g. script.js, index.py).' 
+      });
+    }
+
+    // Check for duplicate filename in same room
+    const existing = await db.collection('files')
+      .where('roomId', '==', roomId)
+      .where('filename', '==', cleanFilename)
+      .get();
+
+    if (!existing.empty) {
+      return res.status(400).json({ message: `A file named "${cleanFilename}" already exists in this room.` });
+    }
+
+    const lang = detectLanguage(cleanFilename, language);
+    const ref = db.collection('files').doc();
+    const file = {
+      roomId,
+      filename: cleanFilename,
+      language: lang,
+      content: typeof content === 'string' ? content : '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await ref.set(file);
+    return res.status(201).json({ file: { id: ref.id, ...file } });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateFile(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { roomId, filename, language, content } = req.body;
+
+    if (!valid(id)) {
+      return res.status(400).json({ message: 'File id is required.' });
+    }
+
+    const ref = db.collection('files').doc(id);
+    const doc = await ref.get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ message: 'File not found.' });
+    }
+
+    const existingData = doc.data();
+    const update = { updatedAt: new Date().toISOString() };
+
+    if (filename !== undefined) {
+      const cleanFilename = String(filename).trim();
+      if (!cleanFilename) {
+        return res.status(400).json({ message: 'Filename cannot be empty.' });
+      }
+
+      // If renaming, check for conflict
+      if (cleanFilename !== existingData.filename && roomId) {
+        const dup = await db.collection('files')
+          .where('roomId', '==', roomId)
+          .where('filename', '==', cleanFilename)
+          .get();
+
+        if (!dup.empty && dup.docs[0].id !== id) {
+          return res.status(400).json({ message: `A file named "${cleanFilename}" already exists in this room.` });
+        }
+      }
+
+      update.filename = cleanFilename;
+      if (!language) {
+        update.language = detectLanguage(cleanFilename, existingData.language);
+      }
+    }
+
+    if (language !== undefined) {
+      update.language = language;
+    }
+
+    if (content !== undefined) {
+      update.content = content;
+    }
+
+    await ref.update(update);
+    const updatedDoc = await ref.get();
+
+    return res.json({ file: { id: updatedDoc.id, ...updatedDoc.data() } });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteFile(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!valid(id)) {
+      return res.status(400).json({ message: 'File id is required.' });
+    }
+
+    const ref = db.collection('files').doc(id);
+    const doc = await ref.get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ message: 'File not found.' });
+    }
+
+    await ref.delete();
+    return res.json({ ok: true, id });
+  } catch (error) {
+    next(error);
+  }
+}

@@ -6,18 +6,80 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useUser, useClerk } from '@clerk/clerk-react';
 import { Link, useParams } from 'react-router-dom';
 import { MonacoBinding } from '../y-monaco-local.js';
-import { Play, MessageSquare, Send, Users, LogOut, ChevronLeft, Lock, Clock } from 'lucide-react';
+import { 
+  Play, 
+  MessageSquare, 
+  Send, 
+  Users, 
+  LogOut, 
+  ChevronLeft, 
+  Lock, 
+  Clock, 
+  FileCode, 
+  Plus, 
+  Trash2, 
+  FileText,
+  Folder 
+} from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useYjsRoom } from '@/hooks/useYjsRoom';
 import { useChatSocket } from '@/hooks/useChatSocket';
-import { getLanguageOption , LANGUAGE_OPTIONS } from '@/utils/languages';
+import { getLanguageOption, LANGUAGE_OPTIONS } from '@/utils/languages';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 
-import { fetchRoomRequests, approveJoinRequest, rejectJoinRequest, fetchRoomById, fetchMyRequests, createJoinRequest, cancelJoinRequest, removeCollaborator, setCollaboratorMuted } from '@/services/roomsApi';
+import { 
+  fetchRoomRequests, 
+  approveJoinRequest, 
+  rejectJoinRequest, 
+  fetchRoomById, 
+  fetchMyRequests, 
+  createJoinRequest, 
+  cancelJoinRequest, 
+  removeCollaborator, 
+  setCollaboratorMuted 
+} from '@/services/roomsApi';
+
+import {
+  fetchFiles,
+  createFile,
+  updateFile,
+  deleteFile,
+} from '@/services/filesApi';
 
 const COLORS = ['#38bdf8', '#a78bfa', '#f472b6', '#34d399', '#fbbf24'];
-const ACTIVE_FILENAME = 'main.js';
+
+const EXT_TO_LANG = {
+  js: 'javascript',
+  jsx: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  py: 'python',
+  java: 'java',
+  cpp: 'cpp',
+  c: 'c',
+  cs: 'csharp',
+  html: 'html',
+  css: 'css',
+  json: 'json',
+  md: 'markdown',
+  sql: 'sql',
+  rust: 'rust',
+  rs: 'rust',
+  go: 'go',
+  php: 'php',
+  rb: 'ruby',
+};
+
+function detectLangFromFilename(name) {
+  if (!name) return 'javascript';
+  const parts = name.split('.');
+  if (parts.length > 1) {
+    const ext = parts.pop().toLowerCase();
+    if (EXT_TO_LANG[ext]) return EXT_TO_LANG[ext];
+  }
+  return 'javascript';
+}
 
 export default function EditorWorkspace() {
   const { user, isLoaded } = useUser();
@@ -42,8 +104,16 @@ export default function EditorWorkspace() {
   const [removedInfo, setRemovedInfo] = useState({ isRemoved: false, hostName: '' });
   const [actionLoading, setActionLoading] = useState(false);
 
+  // Multi-File State
+  const [files, setFiles] = useState([]);
+  const [activeFileId, setActiveFileId] = useState(null);
+  const [showNewFileModal, setShowNewFileModal] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
+  const [creatingFile, setCreatingFile] = useState(false);
+  const [fileCreateError, setFileCreateError] = useState('');
+  const [fileToDelete, setFileToDelete] = useState(null);
+
   // Workspace, editor & chat states
-  const [language, setLanguage] = useState('python');
   const [output, setOutput] = useState('');
   const [outputErr, setOutputErr] = useState('');
   const [running, setRunning] = useState(false);
@@ -56,23 +126,33 @@ export default function EditorWorkspace() {
   const [showRemoveModal, setShowRemoveModal] = useState(false);
   const [selectedCollaborator, setSelectedCollaborator] = useState(null);
 
+  // Active File Reference
+  const activeFile = useMemo(() => {
+    if (!files || files.length === 0) return null;
+    return files.find(f => f.id === activeFileId) || files[0];
+  }, [files, activeFileId]);
+
+  const activeLanguage = useMemo(() => {
+    return activeFile?.language || 'python';
+  }, [activeFile]);
+
   // Component Refs
   const editorRef = useRef(null);
+  const monacoNsRef = useRef(null);
   const bindingRef = useRef(null);
   const modelRef = useRef(null);
-  const dbFileRef = useRef(null);
   const hydratedRef = useRef(false);
   const chatEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const isNearBottomRef = useRef(true);
 
-  // Track chat scroll position to prevent auto-scrolling when user is reading older messages
+  // Track chat scroll position
   const handleChatScroll = useCallback((e) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     isNearBottomRef.current = scrollHeight - scrollTop - clientHeight <= 100;
   }, []);
 
-  // Helper to check if a specific collaborator is muted
+  // Helper to check if a collaborator is muted
   const isUserMuted = useCallback((targetUserId) => {
     if (!targetUserId) return false;
     if (targetUserId === user?.id && isMuted) return true;
@@ -90,7 +170,7 @@ export default function EditorWorkspace() {
     return false;
   }, [room?.collaborators, user?.id, isMuted, awareUsers]);
 
-  // 2. Access Check: Verify if user is collaborator, or if request is pending
+  // 2. Access Check: Verify permissions
   useEffect(() => {
     if (!isLoaded || !user || !roomId) return;
 
@@ -205,7 +285,7 @@ export default function EditorWorkspace() {
     if (!myRequest) return;
     try {
       setIsSendingRequest(true);
-      await cancelJoinRequest(myRequest.id);
+      await cancelJoinRequest(myRequest.id, user.id);
       setMyRequest(null);
     } catch (err) {
       console.error('Failed to cancel request:', err);
@@ -398,10 +478,8 @@ export default function EditorWorkspace() {
     setChatInput('');
   };
 
-  // Hydration from Firestore
+  // Hydration of Multi-Files from Firestore & Yjs
   useEffect(() => {
-    // CRITICAL: Wait for doc to be synced with the server before hydration.
-    // This prevents duplicate content if two users join at the same time.
     if (!synced || !doc || !sources || !langs || !roomId) return;
 
     if (hydratedRef.current) {
@@ -411,25 +489,28 @@ export default function EditorWorkspace() {
 
     (async () => {
       try {
-        const files = await fetchFiles(roomId);
-        const mainFile = files.find(f => f.filename === ACTIVE_FILENAME);
-        
-        if (mainFile) {
-          dbFileRef.current = mainFile;
-          setLanguage(mainFile.language || 'python');
+        const fetchedFiles = await fetchFiles(roomId);
+        setFiles(fetchedFiles);
+
+        if (fetchedFiles.length > 0) {
+          setActiveFileId(prevId => {
+            if (prevId && fetchedFiles.some(f => f.id === prevId)) return prevId;
+            return fetchedFiles[0].id;
+          });
         }
 
         doc.transact(() => {
-          // Use top-level deterministic type to prevent overwrite race conditions
-          const t = doc.getText(ACTIVE_FILENAME);
-          if (t.length === 0 && mainFile?.content) {
-            t.insert(0, mainFile.content);
-          }
-          if (!langs.has(ACTIVE_FILENAME)) {
-            langs.set(ACTIVE_FILENAME, mainFile?.language || 'python');
-          }
+          fetchedFiles.forEach(file => {
+            const t = doc.getText(file.id);
+            if (t.length === 0 && file.content) {
+              t.insert(0, file.content);
+            }
+            if (!langs.has(file.id)) {
+              langs.set(file.id, file.language || 'python');
+            }
+          });
         });
-        
+
         hydratedRef.current = true;
         setIsSyncing(false);
       } catch (e) {
@@ -439,21 +520,175 @@ export default function EditorWorkspace() {
     })();
   }, [doc, sources, langs, roomId, synced]);
 
-  // Cleanup effect for binding and model
+  // Bind Editor to the currently Active File
+  const bindActiveFile = useCallback((editor, monacoNs, file) => {
+    if (!editor || !monacoNs || !doc || !provider || !file) return;
+
+    bindingRef.current?.destroy();
+
+    const ytext = doc.getText(file.id);
+    const lang = file.language || langs?.get(file.id) || 'javascript';
+    const uri = monacoNs.Uri.parse(`file:///${roomId}/${file.id}/${file.filename}`);
+
+    let model = monacoNs.editor.getModel(uri);
+    if (!model) {
+      model = monacoNs.editor.createModel(
+        ytext.toString(),
+        lang,
+        uri
+      );
+    } else {
+      monacoNs.editor.setModelLanguage(model, lang);
+    }
+
+    modelRef.current = model;
+    editor.setModel(model);
+
+    editor.updateOptions({
+      readOnly: isMuted,
+      domReadOnly: isMuted,
+    });
+
+    const binding = new MonacoBinding(
+      monacoNs,
+      ytext,
+      model,
+      new Set(),
+      provider.awareness
+    );
+
+    bindingRef.current = binding;
+  }, [doc, provider, langs, roomId, isMuted]);
+
+  // Re-bind when active file, editor or doc changes
+  useEffect(() => {
+    if (editorRef.current && monacoNsRef.current && activeFile) {
+      bindActiveFile(editorRef.current, monacoNsRef.current, activeFile);
+    }
+  }, [activeFile?.id, bindActiveFile]);
+
+  // Mount editor handler
+  const handleEditorMount = (editor, monacoNs) => {
+    editorRef.current = editor;
+    monacoNsRef.current = monacoNs;
+    if (activeFile) {
+      bindActiveFile(editor, monacoNs, activeFile);
+    }
+  };
+
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (bindingRef.current) {
-        console.log('[Editor] Destroying binding');
         bindingRef.current.destroy();
         bindingRef.current = null;
       }
       if (modelRef.current) {
-        console.log('[Editor] Disposing model');
         modelRef.current.dispose();
         modelRef.current = null;
       }
     };
   }, [roomId]);
+
+  // Language Change for Active File
+  const handleLanguageSelect = async (nextLang) => {
+    if (!activeFile) return;
+
+    // Update in local state
+    setFiles(prev => prev.map(f => f.id === activeFile.id ? { ...f, language: nextLang } : f));
+
+    // Update in Yjs
+    if (doc && langs) {
+      doc.transact(() => {
+        langs.set(activeFile.id, nextLang);
+      });
+    }
+
+    // Update in Monaco
+    if (modelRef.current && monacoNsRef.current) {
+      monacoNsRef.current.editor.setModelLanguage(modelRef.current, nextLang);
+    }
+
+    // Update in Firestore
+    try {
+      await updateFile(activeFile.id, roomId, { language: nextLang });
+    } catch (err) {
+      console.warn('Failed to update file language on server:', err.message);
+    }
+  };
+
+  // Create New File
+  const handleCreateFile = async (e) => {
+    e?.preventDefault();
+    if (!roomId) return;
+
+    const cleanName = newFileName.trim();
+    if (!cleanName) {
+      setFileCreateError('Please enter a filename.');
+      return;
+    }
+
+    const parts = cleanName.split('.');
+    if (parts.length < 2 || !parts[parts.length - 1].trim()) {
+      setFileCreateError('Please include a valid file extension (e.g. script.js, utils.py, main.cpp, index.html).');
+      return;
+    }
+
+    setCreatingFile(true);
+    setFileCreateError('');
+
+    try {
+      const chosenLang = detectLangFromFilename(cleanName);
+
+      const newFile = await createFile({
+        roomId,
+        filename: cleanName,
+        language: chosenLang,
+        content: '',
+      });
+
+      // Update local state
+      setFiles(prev => [...prev, newFile]);
+      setActiveFileId(newFile.id);
+
+      // Initialize in Yjs doc
+      if (doc && langs) {
+        doc.transact(() => {
+          langs.set(newFile.id, chosenLang);
+        });
+      }
+
+      setShowNewFileModal(false);
+      setNewFileName('');
+    } catch (err) {
+      console.error('Failed to create file:', err);
+      setFileCreateError(err.response?.data?.message || err.message || 'Failed to create file');
+    } finally {
+      setCreatingFile(false);
+    }
+  };
+
+  // Delete File
+  const handleDeleteFile = async () => {
+    if (!fileToDelete || !roomId) return;
+
+    try {
+      await deleteFile(fileToDelete.id, roomId);
+
+      const remaining = files.filter(f => f.id !== fileToDelete.id);
+      setFiles(remaining);
+
+      if (activeFileId === fileToDelete.id) {
+        if (remaining.length > 0) {
+          setActiveFileId(remaining[0].id);
+        }
+      }
+
+      setFileToDelete(null);
+    } catch (err) {
+      console.error('Failed to delete file:', err);
+    }
+  };
 
   // Refresh pending requests
   useEffect(() => {
@@ -482,12 +717,13 @@ export default function EditorWorkspace() {
   useEffect(() => {
     if (!provider || !user) return;
     provider.awareness.setLocalStateField('user', {
-      id: user.id, // Store Clerk user ID for de-duplication
+      id: user.id,
       name: displayName,
       color: userColor,
       muted: isMuted,
+      activeFileId: activeFileId,
     });
-  }, [provider, displayName, userColor, user, isMuted]);
+  }, [provider, displayName, userColor, user, isMuted, activeFileId]);
 
   useEffect(() => {
     if (!provider) return;
@@ -503,6 +739,7 @@ export default function EditorWorkspace() {
               name: st.user.name,
               color: st.user.color,
               muted: st.user.muted === true,
+              activeFileId: st.user.activeFileId,
             });
           }
         }
@@ -514,70 +751,11 @@ export default function EditorWorkspace() {
     return () => provider.awareness.off('change', upd);
   }, [provider]);
 
-  const bindEditor = useCallback((editor, monacoNs) => {
-    if (!doc || !sources || !provider) return;
-
-    bindingRef.current?.destroy();
-    
-    // Always use the deterministic top-level Y.Text
-    const ytext = doc.getText(ACTIVE_FILENAME);
-    const lang = langs.get(ACTIVE_FILENAME) || language;
-
-    const uri = monacoNs.Uri.parse(`file:///${roomId}/${ACTIVE_FILENAME}`);
-
-    const existingModel = monacoNs.editor.getModel(uri);
-    if (existingModel) {
-      existingModel.dispose();
-    }
-
-    // Create fresh synced model
-    const model = monacoNs.editor.createModel(
-      ytext.toString(),
-      lang,
-      uri
-    );
-
-    modelRef.current = model;
-    editor.setModel(model);
-
-    // Clear stale diagnostics
-    monacoNs.editor.setModelMarkers(
-      model,
-      'owner',
-      []
-    );
-
-    editor.updateOptions({
-      readOnly: isMuted,
-      domReadOnly: isMuted,
-    });
-
-    const binding = new MonacoBinding(
-      monacoNs,
-      ytext,
-      model,
-      new Set(),
-      provider.awareness
-    );
-
-    bindingRef.current = binding;
-    editorRef.current = editor;
-  }, [doc, sources, provider, langs, language, roomId, isMuted]);
-
-  const handleLanguageSelect = (next) => {
-    setLanguage(next);
-    if (!doc || !langs) return;
-    doc.transact(() => { langs.set(ACTIVE_FILENAME, next); });
-    if (modelRef.current) monaco.editor.setModelLanguage(modelRef.current, next);
-  };
-
-
-
+  // Python Engine (Pyodide)
   const [pyodide, setPyodide] = useState(null);
 
-  // Initialize Pyodide
   useEffect(() => {
-    if (language === 'python' && !pyodide) {
+    if (activeLanguage === 'python' && !pyodide) {
       const loadPyodide = async () => {
         try {
           if (typeof window.loadPyodide !== 'function') {
@@ -592,18 +770,16 @@ export default function EditorWorkspace() {
           console.error('Failed to load Pyodide:', e);
         }
       };
-      // Retry after a short delay if not ready
       const timer = setTimeout(loadPyodide, 500);
       return () => clearTimeout(timer);
     }
-  }, [language, pyodide]);
+  }, [activeLanguage, pyodide]);
 
   const runJS = (code) => {
     const logs = [];
     const originalLog = console.log;
     const originalError = console.error;
 
-    // Redirect console.log and console.error
     console.log = (...args) => {
       logs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' '));
       originalLog(...args);
@@ -614,16 +790,12 @@ export default function EditorWorkspace() {
     };
 
     try {
-      // Use eval but wrap it to capture any immediate errors
-      // Note: In production apps, you'd use a Web Worker or a sandbox iframe
-      // for better security and to prevent infinite loops from freezing the UI.
       const result = eval(code);
       if (result !== undefined) logs.push(`=> ${result}`);
       setOutput(logs.join('\n'));
     } catch (e) {
       setOutputErr(e.message);
     } finally {
-      // Restore console
       console.log = originalLog;
       console.error = originalError;
     }
@@ -636,7 +808,6 @@ export default function EditorWorkspace() {
     }
 
     try {
-      // Create a virtual stdout to capture print() calls
       pyodide.runPython(`
         import sys
         import io
@@ -668,22 +839,23 @@ export default function EditorWorkspace() {
       setOutput('');
       setOutputErr('');
 
-      if (!doc) {
+      if (!doc || !activeFile) {
         setOutputErr('Document not initialized');
         return;
       }
 
-      // const content = doc.getText(ACTIVE_FILENAME).toString();
       const content = editorRef.current?.getValue() || '';
       if (!content.trim()) {
         setOutputErr('Code editor is empty');
         return;
       }
 
-      if (language === 'javascript') {
+      if (activeLanguage === 'javascript') {
         runJS(content);
-      } else if (language === 'python') {
+      } else if (activeLanguage === 'python') {
         await runPython(content);
+      } else {
+        setOutputErr(`In-browser execution for ${activeLanguage} is not supported directly yet.`);
       }
 
     } catch (e) {
@@ -694,27 +866,15 @@ export default function EditorWorkspace() {
     }
   };
 
-  const loadPendingRequests = async () => { 
-
+  const loadPendingRequests = async () => {
     if (!user?.id) return;
-
     try {
-
-      const requests =
-        await fetchRoomRequests(roomId, user.id);
-
+      const requests = await fetchRoomRequests(roomId, user.id);
       setPendingRequests(requests);
-
     } catch (err) {
-
-      console.error(
-        'Failed to load requests:',
-        err
-      );
+      console.error('Failed to load requests:', err);
     }
   };
-
-
 
   if (removedInfo.isRemoved) {
     return (
@@ -784,7 +944,7 @@ export default function EditorWorkspace() {
               <p className="text-zinc-400 mb-6">
                 Waiting for the host to approve your request to join <strong>{room.name}</strong>.
               </p>
-              
+
               <div className="bg-white/5 border border-white/10 rounded-xl p-4 mb-6 text-left space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Room Name:</span>
@@ -807,8 +967,8 @@ export default function EditorWorkspace() {
               )}
 
               <div className="flex flex-col gap-2">
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   className="bg-red-500/10 text-red-400 hover:bg-red-500/20"
                   onClick={handleCancelRequest}
                   disabled={isSendingRequest}
@@ -851,9 +1011,9 @@ export default function EditorWorkspace() {
           <ChevronLeft className="w-5 h-5" />
           <span className="font-semibold">Back</span>
         </Link>
-        
+
         <div className="h-6 w-px bg-zinc-800" />
-        
+
         <div className="flex items-center gap-2">
           <span className="text-zinc-500 font-mono text-sm">ROOM CODE:</span>
           <code className="bg-zinc-800 px-2 py-1 rounded text-amber-200 text-sm font-mono tracking-wider font-bold">{roomId}</code>
@@ -861,38 +1021,33 @@ export default function EditorWorkspace() {
 
         {room.ownerId == user.id && (
           <>
-          <Button
-      variant="secondary"
-      size="sm"
-      onClick={handleCopyInvite}
-    >
-      Invite
-    </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleCopyInvite}
+            >
+              Invite
+            </Button>
 
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setShowPending(!showPending)}
-            className="gap-2 relative"
-          >
-            <Users className="w-4 h-4" />
-
-            Requests
-
-            {pendingRequests.length > 0 && (
-              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center font-semibold">
-                {pendingRequests.length}
-              </span>
-            )}
-          </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowPending(!showPending)}
+              className="gap-2 relative"
+            >
+              <Users className="w-4 h-4" />
+              Requests
+              {pendingRequests.length > 0 && (
+                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center font-semibold">
+                  {pendingRequests.length}
+                </span>
+              )}
+            </Button>
           </>
         )}
 
-        
-
         {showPending && (
           <div className="absolute top-14 left-0 w-70 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden z-50">
-
             <div className="px-4 py-3 border-b border-zinc-800">
               <h3 className="text-sm font-semibold text-white">
                 Pending Requests
@@ -906,72 +1061,48 @@ export default function EditorWorkspace() {
             ) : (
               pendingRequests.map((req) => (
                 <div
-                  key={req._id}
+                  key={req._id || req.id}
                   className="p-4 border-b border-zinc-800"
                 >
                   <p className="text-white text-sm font-medium">
                     {req.userName}
                   </p>
-
                   <p className="text-zinc-500 text-xs mt-1">
                     wants to join this room
                   </p>
 
-                 <div className="flex gap-2 mt-3">
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={async () => {
+                        try {
+                          await approveJoinRequest(req, user.id);
+                          setPendingRequests(prev => prev.filter(r => r.id !== req.id));
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }}
+                      className="px-3 py-1 text-xs rounded-lg bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      Accept
+                    </button>
 
-                  <button
-                    onClick={async () => {
-
-                      try {
-
-                        await approveJoinRequest(req, user.id);
-
-                        // instantly update UI
-                        setPendingRequests(prev =>
-                          prev.filter(
-                            r => r.id !== req.id
-                          )
-                        );
-
-                      } catch (err) {
-
-                        console.error(err);
-                      }
-                    }}
-                    className="px-3 py-1 text-xs rounded-lg bg-green-600 hover:bg-green-700 text-white"
-                  >
-                    Accept
-                  </button>
-
-                  <button
-                    onClick={async () => {
-
-                      try {
-
-                        await rejectJoinRequest(req, user.id);
-
-                        // instantly update UI
-                        setPendingRequests(prev =>
-                          prev.filter(
-                            r => r.id !== req.id
-                          )
-                        );
-
-                      } catch (err) {
-
-                        console.error(err);
-                      }
-                    }}
-                    className="px-3 py-1 text-xs rounded-lg bg-red-600 hover:bg-red-700 text-white"
-                  >
-                    Reject
-                  </button>
-
-                </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await rejectJoinRequest(req, user.id);
+                          setPendingRequests(prev => prev.filter(r => r.id !== req.id));
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }}
+                      className="px-3 py-1 text-xs rounded-lg bg-red-600 hover:bg-red-700 text-white"
+                    >
+                      Reject
+                    </button>
+                  </div>
                 </div>
               ))
             )}
-
           </div>
         )}
 
@@ -992,9 +1123,9 @@ export default function EditorWorkspace() {
               Chat
             </Button>
           )}
-          
+
           <select
-            value={language}
+            value={activeLanguage}
             onChange={(e) => handleLanguageSelect(e.target.value)}
             className="bg-zinc-800 border border-zinc-700 text-sm rounded-lg px-3 py-1.5 outline-none focus:border-blue-500 transition-colors"
           >
@@ -1009,22 +1140,74 @@ export default function EditorWorkspace() {
       </header>
 
       <PanelGroup direction="horizontal" className="flex-1">
-        {/* Left Side: Collaborators & Info */}
+        {/* Left Side: Multi-File Explorer & Collaborators */}
         <Panel defaultSize={20} minSize={15} className="border-r border-zinc-800 bg-zinc-900/30">
           <div className="flex flex-col h-full">
+            
+            {/* Multi-File Explorer Section */}
             <div className="p-4 border-b border-zinc-800">
-              <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">Workspace</h3>
-              <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-white/10">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold">
-                  {roomId.charAt(0).toUpperCase()}
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Folder className="w-4 h-4 text-indigo-400" />
+                  <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Files ({files.length})</h3>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{ACTIVE_FILENAME}</p>
-                  <p className="text-xs text-zinc-500 uppercase">{language}</p>
-                </div>
+                <button
+                  onClick={() => {
+                    setFileCreateError('');
+                    setNewFileName('');
+                    setShowNewFileModal(true);
+                  }}
+                  className="p-1 rounded-md bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 hover:text-indigo-300 transition text-xs flex items-center gap-1 font-medium cursor-pointer"
+                  title="New File"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span className="text-[11px] pr-1">New</span>
+                </button>
+              </div>
+
+              <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                {files.map((file) => {
+                  const isActive = file.id === activeFile?.id;
+                  return (
+                    <div
+                      key={file.id}
+                      onClick={() => setActiveFileId(file.id)}
+                      className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer text-xs transition border ${
+                        isActive
+                          ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40 font-medium'
+                          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 border-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileCode className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-indigo-400' : 'text-zinc-500'}`} />
+                        <span className="truncate">{file.filename}</span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] uppercase font-mono text-zinc-500 px-1 py-0.5 rounded bg-zinc-800/50">
+                          {file.language || 'code'}
+                        </span>
+                        {files.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFileToDelete(file);
+                            }}
+                            className="text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition p-0.5 rounded hover:bg-zinc-800"
+                            title="Delete file"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
+            {/* Collaborators Section */}
             <div className="flex-1 p-4 overflow-y-auto">
               <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">Collaborators ({awareUsers.length})</h3>
               <div className="space-y-3">
@@ -1037,7 +1220,7 @@ export default function EditorWorkspace() {
                     <div key={u.id || u.userId} className="flex items-center justify-between gap-3 group">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="relative shrink-0">
-                          <div 
+                          <div
                             className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-lg"
                             style={{ background: `linear-gradient(135deg, ${u.color}, ${u.color}dd)` }}
                           >
@@ -1077,11 +1260,10 @@ export default function EditorWorkspace() {
                               type="button"
                               onClick={() => handleToggleMute(u.userId, !isTargetMuted)}
                               disabled={actionLoading}
-                              className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition cursor-pointer ${
-                                isTargetMuted
+                              className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition cursor-pointer ${isTargetMuted
                                   ? 'bg-blue-600/20 text-blue-400 font-medium hover:bg-blue-600/30'
                                   : 'text-zinc-200 hover:bg-zinc-800'
-                              }`}
+                                }`}
                             >
                               {isTargetMuted ? '🔊 Unmute' : '🔇 Mute'}
                             </button>
@@ -1112,8 +1294,8 @@ export default function EditorWorkspace() {
             <Editor
               height="100%"
               theme="vs-dark"
-              language={language}
-              onMount={(ed, mon) => bindEditor(ed, mon)}
+              language={activeLanguage}
+              onMount={handleEditorMount}
               options={{
                 minimap: { enabled: false },
                 fontSize: 14,
@@ -1141,7 +1323,7 @@ export default function EditorWorkspace() {
                   <button onClick={() => setChatOpen(false)} className="text-zinc-500 hover:text-white">×</button>
                 </div>
 
-                <div 
+                <div
                   ref={chatContainerRef}
                   onScroll={handleChatScroll}
                   className="flex-1 overflow-y-auto p-4 space-y-4 chat-scrollbar"
@@ -1149,9 +1331,8 @@ export default function EditorWorkspace() {
                   {messages.map((m, i) => (
                     <div key={i} className={`flex flex-col ${m.user === displayName ? 'items-end' : 'items-start'}`}>
                       <span className="text-[10px] text-zinc-500 mb-1">{m.user}</span>
-                      <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${
-                        m.user === displayName ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-zinc-800 text-zinc-200 rounded-tl-none'
-                      }`}>
+                      <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${m.user === displayName ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-zinc-800 text-zinc-200 rounded-tl-none'
+                        }`}>
                         {m.message}
                       </div>
                     </div>
@@ -1168,7 +1349,7 @@ export default function EditorWorkspace() {
                       placeholder="Type a message..."
                       className="flex-1 bg-transparent text-sm outline-none px-2"
                     />
-                    <button 
+                    <button
                       onClick={handleSendMessage}
                       className="p-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
                       <Send className="w-4 h-4" />
@@ -1184,16 +1365,125 @@ export default function EditorWorkspace() {
       {/* Footer: Output */}
       <div className="h-40 bg-zinc-950 border-t border-zinc-800 p-4 font-mono text-sm overflow-hidden flex flex-col">
         <div className="flex items-center justify-between mb-2 text-zinc-500 text-xs font-bold uppercase tracking-widest">
-          <span>Terminal Output</span>
+          <span>Terminal Output ({activeFile?.filename || 'Active File'})</span>
           {output && <span className="text-green-500 lowercase">Success</span>}
           {outputErr && <span className="text-red-500 lowercase">Error</span>}
         </div>
         <div className="flex-1 overflow-y-auto">
           {outputErr && <pre className="text-red-400 whitespace-pre-wrap">{outputErr}</pre>}
           {output && <pre className="text-green-400 whitespace-pre-wrap">{output}</pre>}
-          {!output && !outputErr && <p className="text-zinc-600 italic">Ready to run code...</p>}
+          {!output && !outputErr && <p className="text-zinc-600 italic">Ready to run {activeFile?.filename || 'code'}...</p>}
         </div>
       </div>
+
+      {/* Modal: New File */}
+      {showNewFileModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
+          <div className="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <FileCode className="w-5 h-5 text-indigo-400" />
+                Create New File
+              </h2>
+              <p className="text-zinc-400 mt-1 text-xs">
+                Add a new file to collaborate on in room <span className="font-mono text-indigo-300 font-semibold">{roomId}</span>.
+              </p>
+            </div>
+
+            <form onSubmit={handleCreateFile} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-2">
+                  Filename <span className="text-zinc-500 font-normal normal-case">(with extension)</span>
+                </label>
+                <input
+                  type="text"
+                  value={newFileName}
+                  onChange={(e) => {
+                    setNewFileName(e.target.value);
+                    setFileCreateError('');
+                  }}
+                  placeholder="e.g. script.js, index.py"
+                  autoFocus
+                  required
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:border-indigo-500 focus:outline-none transition font-mono"
+                />
+
+                {/* Auto-detected language indicator */}
+                <div className="mt-2 text-xs flex items-center gap-1.5">
+                  {newFileName.trim().includes('.') && newFileName.trim().split('.').pop() ? (
+                    <span className="text-emerald-400 font-medium flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded-md">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Auto-detected: <strong className="uppercase font-mono">{detectLangFromFilename(newFileName.trim())}</strong>
+                    </span>
+                  ) : (
+                    <span className="text-zinc-500">
+                      Must include extension (e.g. <span className="font-mono text-zinc-400">.js, .py</span>)
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {fileCreateError && (
+                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium">
+                  {fileCreateError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewFileModal(false)}
+                  disabled={creatingFile}
+                  className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-300 font-medium transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingFile || !newFileName.trim()}
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm text-white font-medium transition shadow-lg shadow-indigo-600/30 disabled:opacity-50 cursor-pointer"
+                >
+                  {creatingFile ? 'Creating...' : 'Create File'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirm Delete File */}
+      {fileToDelete && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
+          <div className="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Trash2 className="w-5 h-5 text-red-400" />
+                Delete File
+              </h2>
+              <p className="text-zinc-400 mt-2 text-sm">
+                Are you sure you want to delete <strong className="text-white font-mono">{fileToDelete.filename}</strong>? This action cannot be undone.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 p-4 bg-zinc-900/80">
+              <button
+                type="button"
+                onClick={() => setFileToDelete(null)}
+                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-300 font-medium transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteFile}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-sm text-white font-medium transition shadow-lg shadow-red-600/30 cursor-pointer"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Confirmation Modal for Removing Collaborator */}
       {showRemoveModal && selectedCollaborator && (

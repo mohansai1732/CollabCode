@@ -11,9 +11,13 @@ const api = axios.create({
 });
 
 let clerkTokenGetter = null;
+let clerkUserGetter = null;
 
-export const setClerkTokenGetter = (getTokenFn) => {
+export const setClerkTokenGetter = (getTokenFn, getUserFn) => {
   clerkTokenGetter = getTokenFn;
+  if (getUserFn) {
+    clerkUserGetter = getUserFn;
+  }
 };
 
 api.interceptors.request.use(
@@ -26,9 +30,20 @@ api.interceptors.request.use(
         }
       } catch (error) {
         console.error('Failed to attach Clerk token:', error);
-        return Promise.reject(error);
       }
     }
+
+    if (clerkUserGetter) {
+      try {
+        const user = typeof clerkUserGetter === 'function' ? clerkUserGetter() : clerkUserGetter;
+        if (user?.publicMetadata?.role) {
+          config.headers['X-Admin-Role'] = user.publicMetadata.role;
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
     return config;
   },
   (error) => Promise.reject(error)

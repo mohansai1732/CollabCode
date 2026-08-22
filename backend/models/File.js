@@ -1,15 +1,15 @@
-// const mongoose = require('mongoose');
 
-// const fileSchema = new mongoose.Schema(
-//   {
-//     roomId: { type: String, required: true, index: true },
-//     filename: { type: String, required: true, trim: true },
-//     language: { type: String, default: 'javascript' },
-//     content: { type: String, default: '' },
-//   },
-//   { timestamps: true },
-// );
 
-// fileSchema.index({ roomId: 1, filename: 1 }, { unique: true });
+export function createFileModel({ roomId, filename, language = 'javascript', content = '' }) {
+  const now = new Date().toISOString();
+  return {
+    roomId: String(roomId || '').trim(),
+    filename: String(filename || '').trim(),
+    language: String(language || 'javascript').toLowerCase(),
+    content: String(content || ''),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
-// module.exports = mongoose.model('File', fileSchema);
+export default { createFileModel };

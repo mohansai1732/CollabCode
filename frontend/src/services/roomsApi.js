@@ -20,8 +20,20 @@ export const fetchRoomById = async (roomId, userId) => {
   return data.room;
 };
 
-export const createJoinRequest = async (user, room) => {
-  const { data } = await api.post('/rooms/join', { roomId: room.id, userId: user.id });
+export const createJoinRequest = async (arg1, arg2) => {
+  let roomId, userId;
+  if (typeof arg1 === 'string' && typeof arg2 === 'string') {
+    roomId = arg1;
+    userId = arg2;
+  } else if (typeof arg1 === 'object') {
+    userId = arg1?.id || arg1?.userId;
+    roomId = typeof arg2 === 'object' ? (arg2?.id || arg2?.roomId) : arg2;
+  } else {
+    roomId = arg1;
+    userId = typeof arg2 === 'object' ? (arg2?.id || arg2?.userId) : arg2;
+  }
+
+  const { data } = await api.post('/rooms/join', { roomId, userId });
   return data;
 };
 
