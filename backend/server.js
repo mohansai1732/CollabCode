@@ -29,10 +29,9 @@ function corsOrigin(origin, callback) {
     return callback(null, true); // Allow server-to-server or Postman requests without origin header
   }
   const isLocalhost = /^http:\/\/localhost:\d+$/.test(origin);
-  const isVercel = origin.endsWith('.vercel.app');
   const isConfiguredClient = origin === clientOrigin;
 
-  if (isLocalhost || isVercel || isConfiguredClient) {
+  if (isLocalhost || isConfiguredClient) {
     callback(null, true); // Allow connection
   } else {
     callback(null, false); // Block unauthorized origins safely

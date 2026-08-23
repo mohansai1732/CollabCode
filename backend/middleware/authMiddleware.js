@@ -47,15 +47,7 @@ export const requireAdmin = async (req, res, next) => {
       || claims.orgRole 
       || auth.orgRole;
 
-    // 2. Check X-Admin-Role / X-User-Role header sent by authenticated client
-    if (!role && req.headers['x-admin-role']) {
-      role = String(req.headers['x-admin-role']).toLowerCase().trim();
-    }
-    if (!role && req.headers['x-user-role']) {
-      role = String(req.headers['x-user-role']).toLowerCase().trim();
-    }
-
-    // 3. Fallback: Check Clerk API if CLERK_SECRET_KEY is configured
+    // 2. Fallback: Check Clerk API if CLERK_SECRET_KEY is configured
     if (!role && process.env.CLERK_SECRET_KEY) {
       try {
         const user = await clerkClient.users.getUser(auth.userId);

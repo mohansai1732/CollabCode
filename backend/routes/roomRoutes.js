@@ -1,5 +1,6 @@
 import express from 'express';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
 import {
   getUserRooms,
   createRoom,
@@ -20,6 +21,9 @@ import {
 
 
 const router = express.Router();
+
+// Require authentication for all room routes
+router.use(requireAuth);
 
 router.get('/find/:roomId', getRoomById);
 

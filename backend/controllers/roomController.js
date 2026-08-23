@@ -107,7 +107,7 @@ function emitRoom(roomId, event, payload) { getIO()?.to(`app:${roomId}`).emit(ev
 
 export async function getUserRooms(req, res, next) {
   try {
-    const userId = req.params.userId;
+    const userId = req.userId;
     if (!requireUserId(userId, res)) return;
     const userRef = db.collection('users').doc(userId);
     const userDoc = await userRef.get();
@@ -168,7 +168,7 @@ async function countCreatedRooms(userId, userDocData) {
 
 export async function createRoom(req, res, next) {
   try {
-    const userId = req.body.userId;
+    const userId = req.userId;
     if (!requireUserId(userId, res)) return;
     const name = String(req.body.name || 'New Room').trim().slice(0, 120);
     const ownerName = String(req.body.ownerName || 'Unknown').trim().slice(0, 120);
@@ -229,7 +229,7 @@ export async function getRoomById(req, res, next) {
     if (!validId(roomId)) return res.status(400).json({ message: 'Invalid room ID.' });
     const doc = await db.collection('rooms').doc(roomId).get();
     if (!doc.exists) return res.status(404).json({ message: 'Room not found.' });
-    const userId = req.query.userId;
+    const userId = req.userId;
     if (!requireUserId(userId, res)) return;
     if (!isMember(doc.data(), userId)) return res.status(403).json({ message: 'You are not a collaborator in this room.' });
     res.json({ room: publicRoom(doc) });
@@ -238,7 +238,7 @@ export async function getRoomById(req, res, next) {
 
 export async function requestJoin(req, res, next) {
   try {
-    const userId = req.body?.userId;
+    const userId = req.userId;
     const roomId = typeof req.body?.roomId === 'string' ? req.body.roomId.trim() : '';
     if (!requireUserId(userId, res)) return;
     if (!roomId) return res.status(400).json({ message: 'Missing: roomId.' });
@@ -278,7 +278,7 @@ export async function listRequests(req, res, next) {
   try {
     const roomId = req.params.roomId; const doc = await db.collection('rooms').doc(roomId).get();
     if (!doc.exists) return res.status(404).json({ message: 'Room not found.' });
-    const userId = req.query.userId;
+    const userId = req.userId;
     if (!requireUserId(userId, res)) return;
     if (doc.data().ownerId !== userId) return res.status(403).json({ message: 'Only the room owner can view requests.' });
     res.json({ requests: array(doc.data().pendingRequests) });
@@ -287,7 +287,7 @@ export async function listRequests(req, res, next) {
 
 export async function fetchMyRequests(req, res, next) {
   try {
-    const userId = req.params.userId;
+    const userId = req.userId;
 
     if (!requireUserId(userId, res)) return;
 
@@ -325,7 +325,7 @@ export async function fetchMyRequests(req, res, next) {
 
 export async function decideRequest(req, res, next) {
   try {
-    const { roomId, userId: targetUserId } = req.params; const actorId = req.body.userId; const accepted = req.body.accept === true;
+    const { roomId, userId: targetUserId } = req.params; const actorId = req.userId; const accepted = req.body.accept === true;
     if (!validId(roomId) || !validId(targetUserId) || !requireUserId(actorId, res)) return res.status(400).json({ message: 'Invalid identifier.' });
     let collaborators;
     await db.runTransaction(async transaction => {
@@ -364,7 +364,7 @@ export async function decideRequest(req, res, next) {
 
 export async function cancelJoinRequest(req, res, next) {
   try {
-    const requestId = req.params.requestId; const actorId = req.body.userId;
+    const requestId = req.params.requestId; const actorId = req.userId;
     if (!validId(requestId) || !requireUserId(actorId, res)) return res.status(400).json({ message: 'Invalid identifier.' });
     let roomId;
     await db.runTransaction(async transaction => {
@@ -386,7 +386,7 @@ export async function cancelJoinRequest(req, res, next) {
 
 export async function removeCollaborator(req, res, next) {
   try {
-    const { roomId, userId } = req.params; const actorId = req.body.userId;
+    const { roomId, userId } = req.params; const actorId = req.userId;
     if (!requireUserId(actorId, res)) return;
     if (actorId === userId) return res.status(400).json({ message: 'Room owners cannot remove themselves.' });
     let ownerName = 'Host';
@@ -409,7 +409,7 @@ export async function removeCollaborator(req, res, next) {
 
 export async function setMute(req, res, next) {
   try {
-    const { roomId, userId } = req.params; const actorId = req.body.userId; const muted = req.body.muted === true;
+    const { roomId, userId } = req.params; const actorId = req.userId; const muted = req.body.muted === true;
     if (!requireUserId(actorId, res)) return;
     if (actorId === userId) return res.status(400).json({ message: 'Room owners cannot mute themselves.' });
     let collaborator;
@@ -430,7 +430,7 @@ export async function setMute(req, res, next) {
 
 export async function deleteRoom(req, res, next) {
   try {
-    const roomId = req.params.roomId; const actorId = req.query.userId; let userIds = [];
+    const roomId = req.params.roomId; const actorId = req.userId; let userIds = [];
     if (!requireUserId(actorId, res)) return;
     await db.runTransaction(async transaction => {
       const ref = db.collection('rooms').doc(roomId); const doc = await transaction.get(ref);
@@ -448,7 +448,7 @@ export async function deleteRoom(req, res, next) {
 
 export async function upgradeSubscription(req, res, next) {
   try {
-    const userId = req.body.userId;
+    const userId = req.userId;
     const clientIsAdmin = req.body.isAdmin === true;
     if (!requireUserId(userId, res)) return;
 
@@ -491,7 +491,7 @@ export async function upgradeSubscription(req, res, next) {
 
 export async function cancelSubscription(req, res, next) {
   try {
-    const userId = req.body.userId;
+    const userId = req.userId;
     if (!requireUserId(userId, res)) return;
 
     const userRef = db.collection('users').doc(userId);
@@ -514,7 +514,7 @@ export async function cancelSubscription(req, res, next) {
 export async function leaveRoom(req, res, next) {
   try {
     const roomId = req.params.roomId;
-    const userId = req.query.userId;
+    const userId = req.userId;
 
     if (!requireUserId(userId, res)) return;
 

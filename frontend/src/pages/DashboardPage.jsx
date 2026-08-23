@@ -204,24 +204,28 @@ export default function DashboardPage() {
 
   const stats = [
     { label: 'Total Sessions',
-      value: 'stay tuned',
+      value: 0,
       icon: Activity,
-      color: 'blue'},
+      bgColor: 'bg-blue-500/10',
+      textColor: 'text-blue-400'},
 
     { label: 'Active Rooms',
       value: myRooms.length,
       icon: FolderCode,
-      color: 'purple'},
+      bgColor: 'bg-purple-500/10',
+      textColor: 'text-purple-400'},
 
     { label: 'Collaborators',
-      value: 'stay tuned',
+      value: 0,
       icon: Users,
-      color: 'pink' },
+      bgColor: 'bg-pink-500/10',
+      textColor: 'text-pink-400' },
 
     { label: 'Hours Coded',
-      value: 'stay tuned',
+      value: 0,
       icon: TrendingUp,
-      color: 'green' },
+      bgColor: 'bg-green-500/10',
+      textColor: 'text-green-400' },
   ];
 
 
@@ -336,8 +340,8 @@ export default function DashboardPage() {
                     </div>
 
                     <div
-                      className={`w-12 h-12 rounded-xl bg-${stat.color}-500/10 flex items-center justify-center transition-all duration-300 group-hover:shadow-lg`}>
-                      <stat.icon className={`w-6 h-6 text-${stat.color}-400 transition-all duration-300 group-hover:scale-110`}/>
+                      className={`w-12 h-12 rounded-xl ${stat.bgColor} flex items-center justify-center transition-all duration-300 group-hover:shadow-lg`}>
+                      <stat.icon className={`w-6 h-6 ${stat.textColor} transition-all duration-300 group-hover:scale-110`}/>
                     </div>
                  </div>
                 </Card>

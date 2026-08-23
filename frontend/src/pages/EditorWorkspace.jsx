@@ -790,7 +790,9 @@ export default function EditorWorkspace() {
     };
 
     try {
-      const result = eval(code);
+      // Use indirect eval (new Function) to prevent local scope leakage and satisfy bundlers
+      const fn = new Function(code);
+      const result = fn();
       if (result !== undefined) logs.push(`=> ${result}`);
       setOutput(logs.join('\n'));
     } catch (e) {

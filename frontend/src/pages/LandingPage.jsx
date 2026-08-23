@@ -86,7 +86,8 @@ export default function LandingPage() {
         <div className="relative max-w-5xl mx-auto">
           <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-purple-600 blur-3xl opacity-20 rounded-3xl"></div>
           <div className="relative rounded-2xl border border-white/10 bg-gray-900/80 backdrop-blur-xl p-2 shadow-2xl">
-            <div className="bg-gray-950 rounded-xl overflow-hidden">
+            <span className="sr-only">Code example showing a React Hero component</span>
+            <div className="bg-gray-950 rounded-xl overflow-hidden" aria-hidden="true">
               <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-800">
                 <div className="flex gap-1.5">
                   <div className="w-3 h-3 rounded-full bg-red-500"></div>
