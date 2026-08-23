@@ -3,6 +3,9 @@ import admin, { db } from '../config/firebaseAdmin.js';
 import { clerkClient } from '@clerk/express';
 import { getIO, disconnectRoomUser, closeYjsRoom } from '../sockets/socketManager.js';
 import { validId, requireUserId } from '../utils/validation.js';
+import { generateRoomCode, newRoomCode } from '../utils/roomCode.js';
+
+export { generateRoomCode, newRoomCode };
 
 const TIERS = {
   free: { rooms: 10, maxParticipants: 10 },
@@ -15,23 +18,6 @@ const collaboratorId = entry => typeof entry === 'string' ? entry : entry?.userI
 const normalizeCollaborators = value => array(value).map(entry => typeof entry === 'string'
   ? { userId: entry, joinedAt: now(), muted: false, mutedReason: null }
   : { muted: false, mutedReason: null, ...entry });
-
-export function generateRoomCode(length = 6) {
-  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const lowercase = 'abcdefghijklmnopqrstuvwxyz';
-  const numbers = '0123456789';
-  const allChars = uppercase + lowercase + numbers;
-
-  while (true) {
-    let code = '';
-    for (let i = 0; i < length; i++) {
-      code += allChars[crypto.randomInt(0, allChars.length)];
-    }
-    if (length < 3 || (/[A-Z]/.test(code) && /[a-z]/.test(code) && /[0-9]/.test(code))) {
-      return code;
-    }
-  }
-}
 
 export function isProUser(userData) {
   if (!userData) return false;
