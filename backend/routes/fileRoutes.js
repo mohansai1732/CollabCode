@@ -1,4 +1,5 @@
 import express from 'express';
+import { requireAuth } from '../middleware/authMiddleware.js';
 import {
   listFiles,
   createFile,
@@ -7,6 +8,9 @@ import {
 } from '../controllers/fileController.js';
 
 const router = express.Router();
+
+// Require authentication for all file operations
+router.use(requireAuth);
 
 router.get('/', listFiles);
 router.post('/', createFile);

@@ -1,4 +1,5 @@
 import { db } from '../config/firebaseAdmin.js';
+import { isMember } from './roomController.js';
 
 function valid(value) {
   return typeof value === 'string' && value.trim().length > 0;
@@ -44,6 +45,15 @@ export async function listFiles(req, res, next) {
       return res.status(400).json({ message: 'roomId query parameter is required.' });
     }
 
+    const roomDoc = await db.collection('rooms').doc(roomId).get();
+    if (!roomDoc.exists) {
+      return res.status(404).json({ message: 'Room not found.' });
+    }
+    const roomData = roomDoc.data();
+    if (!isMember(roomData, req.userId)) {
+      return res.status(403).json({ message: 'You are not a member of this room.' });
+    }
+
     const snapshot = await db.collection('files').where('roomId', '==', roomId).get();
 
     if (snapshot.empty) {
@@ -51,17 +61,9 @@ export async function listFiles(req, res, next) {
       let defaultLang = 'python';
       let defaultFilename = 'main.py';
 
-      try {
-        const roomDoc = await db.collection('rooms').doc(roomId).get();
-        if (roomDoc.exists) {
-          const roomData = roomDoc.data();
-          if (roomData?.language) {
-            defaultLang = roomData.language;
-            defaultFilename = defaultLang === 'javascript' ? 'main.js' : `main.${defaultLang === 'python' ? 'py' : 'txt'}`;
-          }
-        }
-      } catch (err) {
-        console.warn('Could not read room language for default file:', err.message);
+      if (roomData?.language) {
+        defaultLang = roomData.language;
+        defaultFilename = defaultLang === 'javascript' ? 'main.js' : `main.${defaultLang === 'python' ? 'py' : 'txt'}`;
       }
 
       const fileRef = db.collection('files').doc();
@@ -97,6 +99,15 @@ export async function createFile(req, res, next) {
     const { roomId, filename, language, content } = req.body;
     if (!valid(roomId) || !valid(filename)) {
       return res.status(400).json({ message: 'roomId and filename are required.' });
+    }
+
+    const roomDoc = await db.collection('rooms').doc(roomId).get();
+    if (!roomDoc.exists) {
+      return res.status(404).json({ message: 'Room not found.' });
+    }
+    const roomData = roomDoc.data();
+    if (!isMember(roomData, req.userId)) {
+      return res.status(403).json({ message: 'You are not a member of this room.' });
     }
 
     const cleanFilename = filename.trim();
@@ -154,6 +165,15 @@ export async function updateFile(req, res, next) {
     }
 
     const existingData = doc.data();
+    const targetRoomId = roomId || existingData.roomId;
+
+    if (targetRoomId) {
+      const roomDoc = await db.collection('rooms').doc(targetRoomId).get();
+      if (!roomDoc.exists || !isMember(roomDoc.data(), req.userId)) {
+        return res.status(403).json({ message: 'You are not authorized to update files in this room.' });
+      }
+    }
+
     const update = { updatedAt: new Date().toISOString() };
 
     if (filename !== undefined) {
@@ -163,9 +183,9 @@ export async function updateFile(req, res, next) {
       }
 
       // If renaming, check for conflict
-      if (cleanFilename !== existingData.filename && roomId) {
+      if (cleanFilename !== existingData.filename && targetRoomId) {
         const dup = await db.collection('files')
-          .where('roomId', '==', roomId)
+          .where('roomId', '==', targetRoomId)
           .where('filename', '==', cleanFilename)
           .get();
 
@@ -209,6 +229,14 @@ export async function deleteFile(req, res, next) {
 
     if (!doc.exists) {
       return res.status(404).json({ message: 'File not found.' });
+    }
+
+    const fileData = doc.data();
+    if (fileData.roomId) {
+      const roomDoc = await db.collection('rooms').doc(fileData.roomId).get();
+      if (!roomDoc.exists || !isMember(roomDoc.data(), req.userId)) {
+        return res.status(403).json({ message: 'You are not authorized to delete files in this room.' });
+      }
     }
 
     await ref.delete();
