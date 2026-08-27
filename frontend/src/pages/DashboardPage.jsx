@@ -204,7 +204,7 @@ export default function DashboardPage() {
 
   const stats = [
     { label: 'Total Sessions',
-      value: 0,
+      value: 'stay tuned',
       icon: Activity,
       bgColor: 'bg-blue-500/10',
       textColor: 'text-blue-400'},
@@ -216,13 +216,13 @@ export default function DashboardPage() {
       textColor: 'text-purple-400'},
 
     { label: 'Collaborators',
-      value: 0,
+      value: 'stay tuned',
       icon: Users,
       bgColor: 'bg-pink-500/10',
       textColor: 'text-pink-400' },
 
     { label: 'Hours Coded',
-      value: 0,
+      value: 'stay tuned',
       icon: TrendingUp,
       bgColor: 'bg-green-500/10',
       textColor: 'text-green-400' },

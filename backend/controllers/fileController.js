@@ -11,9 +11,9 @@ const EXT_TO_LANG = {
   ts: 'typescript',
   tsx: 'typescript',
   py: 'python',
-  java: 'java',
-  cpp: 'cpp',
-  c: 'c',
+  java: 'javalatest',
+  cpp: 'cpplatest',
+  c: 'cpplatest',
   cs: 'csharp',
   html: 'html',
   css: 'css',
@@ -63,7 +63,17 @@ export async function listFiles(req, res, next) {
 
       if (roomData?.language) {
         defaultLang = roomData.language;
-        defaultFilename = defaultLang === 'javascript' ? 'main.js' : `main.${defaultLang === 'python' ? 'py' : 'txt'}`;
+        if (defaultLang === 'javascript') {
+          defaultFilename = 'main.js';
+        } else if (defaultLang === 'python') {
+          defaultFilename = 'main.py';
+        } else if (['cpp14', 'cpplatest'].includes(defaultLang)) {
+          defaultFilename = 'main.cpp';
+        } else if (['java11', 'javalatest'].includes(defaultLang)) {
+          defaultFilename = 'Main.java';
+        } else {
+          defaultFilename = 'main.txt';
+        }
       }
 
       const fileRef = db.collection('files').doc();

@@ -6,20 +6,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useUser, useClerk } from '@clerk/clerk-react';
 import { Link, useParams } from 'react-router-dom';
 import { MonacoBinding } from '../y-monaco-local.js';
-import { 
-  Play, 
-  MessageSquare, 
-  Send, 
-  Users, 
-  LogOut, 
-  ChevronLeft, 
-  Lock, 
-  Clock, 
-  FileCode, 
-  Plus, 
-  Trash2, 
+import {
+  Play,
+  MessageSquare,
+  Send,
+  Users,
+  LogOut,
+  ChevronLeft,
+  Lock,
+  Clock,
+  FileCode,
+  Plus,
+  Trash2,
   FileText,
-  Folder 
+  Folder
 } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useYjsRoom } from '@/hooks/useYjsRoom';
@@ -28,16 +28,16 @@ import { getLanguageOption, LANGUAGE_OPTIONS } from '@/utils/languages';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 
-import { 
-  fetchRoomRequests, 
-  approveJoinRequest, 
-  rejectJoinRequest, 
-  fetchRoomById, 
-  fetchMyRequests, 
-  createJoinRequest, 
-  cancelJoinRequest, 
-  removeCollaborator, 
-  setCollaboratorMuted 
+import {
+  fetchRoomRequests,
+  approveJoinRequest,
+  rejectJoinRequest,
+  fetchRoomById,
+  fetchMyRequests,
+  createJoinRequest,
+  cancelJoinRequest,
+  removeCollaborator,
+  setCollaboratorMuted
 } from '@/services/roomsApi';
 
 import {
@@ -47,6 +47,8 @@ import {
   deleteFile,
 } from '@/services/filesApi';
 
+import { executeCode } from '@/services/executeApi';
+
 const COLORS = ['#38bdf8', '#a78bfa', '#f472b6', '#34d399', '#fbbf24'];
 
 const EXT_TO_LANG = {
@@ -55,9 +57,9 @@ const EXT_TO_LANG = {
   ts: 'typescript',
   tsx: 'typescript',
   py: 'python',
-  java: 'java',
-  cpp: 'cpp',
-  c: 'c',
+  java: 'javalatest',
+  cpp: 'cpplatest',
+  c: 'cpplatest',
   cs: 'csharp',
   html: 'html',
   css: 'css',
@@ -116,7 +118,11 @@ export default function EditorWorkspace() {
   // Workspace, editor & chat states
   const [output, setOutput] = useState('');
   const [outputErr, setOutputErr] = useState('');
+  const [stdin, setStdin] = useState('');
+  const [activeTab, setActiveTab] = useState('output');
   const [running, setRunning] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState(null);
   const [chatInput, setChatInput] = useState('');
   const [awareUsers, setAwareUsers] = useState([]);
   const [chatOpen, setChatOpen] = useState(true);
@@ -145,6 +151,8 @@ export default function EditorWorkspace() {
   const chatEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const isNearBottomRef = useRef(true);
+  const saveTimerRef = useRef(null);
+  const yTextObserverRef = useRef(null);
 
   // Track chat scroll position
   const handleChatScroll = useCallback((e) => {
@@ -525,20 +533,29 @@ export default function EditorWorkspace() {
     if (!editor || !monacoNs || !doc || !provider || !file) return;
 
     bindingRef.current?.destroy();
+    if (yTextObserverRef.current) {
+      const { ytext, observer } = yTextObserverRef.current;
+      ytext.unobserve(observer);
+      yTextObserverRef.current = null;
+    }
 
     const ytext = doc.getText(file.id);
     const lang = file.language || langs?.get(file.id) || 'javascript';
     const uri = monacoNs.Uri.parse(`file:///${roomId}/${file.id}/${file.filename}`);
 
+    let monacoLang = lang;
+    if (['cpp14', 'cpplatest'].includes(lang)) monacoLang = 'cpp';
+    if (['java11', 'javalatest'].includes(lang)) monacoLang = 'java';
+
     let model = monacoNs.editor.getModel(uri);
     if (!model) {
       model = monacoNs.editor.createModel(
         ytext.toString(),
-        lang,
+        monacoLang,
         uri
       );
     } else {
-      monacoNs.editor.setModelLanguage(model, lang);
+      monacoNs.editor.setModelLanguage(model, monacoLang);
     }
 
     modelRef.current = model;
@@ -556,6 +573,25 @@ export default function EditorWorkspace() {
       new Set(),
       provider.awareness
     );
+
+    const onYTextChange = (event, transaction) => {
+      if (transaction.local) {
+        setIsSaving(true);
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = setTimeout(() => {
+          updateFile(file.id, roomId, { content: ytext.toString() }).then(() => {
+            setIsSaving(false);
+            setLastSaved(new Date());
+            setTimeout(() => setLastSaved(null), 3000);
+          }).catch(err => {
+            console.error('Autosave failed:', err);
+            setIsSaving(false);
+          });
+        }, 2000);
+      }
+    };
+    ytext.observe(onYTextChange);
+    yTextObserverRef.current = { ytext, observer: onYTextChange };
 
     bindingRef.current = binding;
   }, [doc, provider, langs, roomId, isMuted]);
@@ -583,6 +619,14 @@ export default function EditorWorkspace() {
         bindingRef.current.destroy();
         bindingRef.current = null;
       }
+      if (yTextObserverRef.current) {
+        const { ytext, observer } = yTextObserverRef.current;
+        ytext.unobserve(observer);
+        yTextObserverRef.current = null;
+      }
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
       if (modelRef.current) {
         modelRef.current.dispose();
         modelRef.current = null;
@@ -606,7 +650,10 @@ export default function EditorWorkspace() {
 
     // Update in Monaco
     if (modelRef.current && monacoNsRef.current) {
-      monacoNsRef.current.editor.setModelLanguage(modelRef.current, nextLang);
+      let monacoLang = nextLang;
+      if (['cpp14', 'cpplatest'].includes(nextLang)) monacoLang = 'cpp';
+      if (['java11', 'javalatest'].includes(nextLang)) monacoLang = 'java';
+      monacoNsRef.current.editor.setModelLanguage(modelRef.current, monacoLang);
     }
 
     // Update in Firestore
@@ -838,6 +885,7 @@ export default function EditorWorkspace() {
   const handleRun = async () => {
     try {
       setRunning(true);
+      setActiveTab('output');
       setOutput('');
       setOutputErr('');
 
@@ -856,6 +904,17 @@ export default function EditorWorkspace() {
         runJS(content);
       } else if (activeLanguage === 'python') {
         await runPython(content);
+      } else if (['cpp14', 'cpplatest', 'java11', 'javalatest'].includes(activeLanguage)) {
+        try {
+          const res = await executeCode(activeLanguage, content, stdin);
+          if (res.error) {
+            setOutputErr(res.error);
+          } else {
+            setOutput(res.output);
+          }
+        } catch (err) {
+          setOutputErr(err.message || 'Execution failed');
+        }
       } else {
         setOutputErr(`In-browser execution for ${activeLanguage} is not supported directly yet.`);
       }
@@ -1145,7 +1204,7 @@ export default function EditorWorkspace() {
         {/* Left Side: Multi-File Explorer & Collaborators */}
         <Panel defaultSize={20} minSize={15} className="border-r border-zinc-800 bg-zinc-900/30">
           <div className="flex flex-col h-full">
-            
+
             {/* Multi-File Explorer Section */}
             <div className="p-4 border-b border-zinc-800">
               <div className="flex items-center justify-between mb-3">
@@ -1174,11 +1233,10 @@ export default function EditorWorkspace() {
                     <div
                       key={file.id}
                       onClick={() => setActiveFileId(file.id)}
-                      className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer text-xs transition border ${
-                        isActive
+                      className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer text-xs transition border ${isActive
                           ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40 font-medium'
                           : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 border-transparent'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <FileCode className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-indigo-400' : 'text-zinc-500'}`} />
@@ -1263,8 +1321,8 @@ export default function EditorWorkspace() {
                               onClick={() => handleToggleMute(u.userId, !isTargetMuted)}
                               disabled={actionLoading}
                               className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition cursor-pointer ${isTargetMuted
-                                  ? 'bg-blue-600/20 text-blue-400 font-medium hover:bg-blue-600/30'
-                                  : 'text-zinc-200 hover:bg-zinc-800'
+                                ? 'bg-blue-600/20 text-blue-400 font-medium hover:bg-blue-600/30'
+                                : 'text-zinc-200 hover:bg-zinc-800'
                                 }`}
                             >
                               {isTargetMuted ? '🔊 Unmute' : '🔇 Mute'}
@@ -1293,10 +1351,26 @@ export default function EditorWorkspace() {
         {/* Middle: Editor */}
         <Panel defaultSize={chatOpen ? 55 : 80}>
           <div className="h-full relative">
+            {/* Autosave Indicator Overlay */}
+            {(isSaving || lastSaved) && (
+              <div className="absolute top-2 right-6 z-50 px-2 py-1 bg-zinc-800/80 backdrop-blur border border-zinc-700 rounded text-[10px] uppercase font-bold tracking-wider text-zinc-400 flex items-center gap-1.5 shadow-lg animate-in fade-in zoom-in duration-200">
+                {isSaving ? (
+                  <>
+                    <div className="w-2 h-2 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                    Saved
+                  </>
+                )}
+              </div>
+            )}
             <Editor
               height="100%"
               theme="vs-dark"
-              language={activeLanguage}
+              language={['cpp14', 'cpplatest'].includes(activeLanguage) ? 'cpp' : (['java11', 'javalatest'].includes(activeLanguage) ? 'java' : activeLanguage)}
               onMount={handleEditorMount}
               options={{
                 minimap: { enabled: false },
@@ -1364,17 +1438,53 @@ export default function EditorWorkspace() {
         )}
       </PanelGroup>
 
-      {/* Footer: Output */}
-      <div className="h-40 bg-zinc-950 border-t border-zinc-800 p-4 font-mono text-sm overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between mb-2 text-zinc-500 text-xs font-bold uppercase tracking-widest">
-          <span>Terminal Output ({activeFile?.filename || 'Active File'})</span>
-          {output && <span className="text-green-500 lowercase">Success</span>}
-          {outputErr && <span className="text-red-500 lowercase">Error</span>}
+      {/* Footer: Terminal / Input Tabs */}
+      <div className="h-56 bg-zinc-950 border-t border-zinc-800 flex flex-col">
+        {/* Tab Bar */}
+        <div className="flex items-center px-4 bg-zinc-900 border-b border-zinc-800">
+          <button
+            onClick={() => setActiveTab('input')}
+            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors ${activeTab === 'input'
+                ? 'border-indigo-500 text-indigo-400 bg-zinc-800/50'
+                : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'
+              }`}
+          >
+            Input
+          </button>
+          <button
+            onClick={() => setActiveTab('output')}
+            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors ${activeTab === 'output'
+                ? 'border-indigo-500 text-indigo-400 bg-zinc-800/50'
+                : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'
+              }`}
+          >
+            Terminal Output
+          </button>
+
+          <div className="ml-auto flex items-center gap-3">
+            <span className="text-zinc-500 text-[10px] uppercase font-mono">{activeFile?.filename || 'No File'}</span>
+            {output && <span className="text-green-500 text-xs lowercase font-bold">Success</span>}
+            {outputErr && <span className="text-red-500 text-xs lowercase font-bold">Error</span>}
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          {outputErr && <pre className="text-red-400 whitespace-pre-wrap">{outputErr}</pre>}
-          {output && <pre className="text-green-400 whitespace-pre-wrap">{output}</pre>}
-          {!output && !outputErr && <p className="text-zinc-600 italic">Ready to run {activeFile?.filename || 'code'}...</p>}
+
+        {/* Tab Content */}
+        <div className="flex-1 overflow-hidden relative">
+          {activeTab === 'input' && (
+            <textarea
+              className="absolute inset-0 w-full h-full bg-zinc-950 text-zinc-300 text-sm p-4 outline-none resize-none font-mono custom-scrollbar"
+              placeholder="Enter standard input here..."
+              value={stdin}
+              onChange={(e) => setStdin(e.target.value)}
+            />
+          )}
+          {activeTab === 'output' && (
+            <div className="absolute inset-0 w-full h-full overflow-y-auto p-4 bg-zinc-950 font-mono text-sm custom-scrollbar">
+              {outputErr && <pre className="text-red-400 whitespace-pre-wrap">{outputErr}</pre>}
+              {output && <pre className="text-green-400 whitespace-pre-wrap">{output}</pre>}
+              {!output && !outputErr && <p className="text-zinc-600 italic">Ready to run code...</p>}
+            </div>
+          )}
         </div>
       </div>
 
