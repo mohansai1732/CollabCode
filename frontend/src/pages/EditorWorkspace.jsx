@@ -48,40 +48,22 @@ import {
   deleteFile,
 } from '@/services/filesApi';
 
-import { executeCode } from '@/services/executeApi';
-
 const COLORS = ['#38bdf8', '#a78bfa', '#f472b6', '#34d399', '#fbbf24'];
 
+// Strictly lock down the IDE to only support these exact extensions
 const EXT_TO_LANG = {
   js: 'javascript',
-  jsx: 'javascript',
-  ts: 'typescript',
-  tsx: 'typescript',
   py: 'python',
-  java: 'java',
-  cpp: 'cpp',
-  c: 'cpp',
-  cs: 'csharp',
-  html: 'html',
-  css: 'css',
-  json: 'json',
-  md: 'markdown',
-  sql: 'sql',
-  rust: 'rust',
-  rs: 'rust',
-  go: 'go',
-  php: 'php',
-  rb: 'ruby',
 };
 
 function detectLangFromFilename(name) {
-  if (!name) return 'javascript';
+  if (!name) return null;
   const parts = name.split('.');
   if (parts.length > 1) {
     const ext = parts.pop().toLowerCase();
     if (EXT_TO_LANG[ext]) return EXT_TO_LANG[ext];
   }
-  return 'javascript';
+  return null;
 }
 
 export default function EditorWorkspace() {
@@ -653,7 +635,13 @@ export default function EditorWorkspace() {
 
     const parts = cleanName.split('.');
     if (parts.length < 2 || !parts[parts.length - 1].trim()) {
-      setFileCreateError('Please include a valid file extension (e.g. script.js, utils.py, main.cpp, index.html).');
+      setFileCreateError('Please include a valid file extension (e.g. script.js, utils.py).');
+      return;
+    }
+
+    const chosenLang = detectLangFromFilename(cleanName);
+    if (!chosenLang) {
+      setFileCreateError(`Extension .${parts[parts.length - 1]} is not supported.`);
       return;
     }
 
@@ -661,8 +649,6 @@ export default function EditorWorkspace() {
     setFileCreateError('');
 
     try {
-      const chosenLang = detectLangFromFilename(cleanName);
-
       const newFile = await createFile({
         roomId,
         filename: cleanName,
@@ -843,33 +829,58 @@ export default function EditorWorkspace() {
     try {
       setRunning(true);
       setActiveTab('output');
-      setOutput('');
+      setOutput('Starting execution...\n');
       setOutputErr('');
 
       if (!doc || !activeFile) {
         setOutputErr('Document not initialized');
+        setRunning(false);
         return;
       }
 
       const content = editorRef.current?.getValue() || '';
       if (!content.trim()) {
         setOutputErr('Code editor is empty');
+        setRunning(false);
         return;
       }
 
-      if (['cpp', 'java', 'python', 'javascript'].includes(activeLanguage)) {
-        try {
-          const res = await executeCode(activeLanguage, content, stdin);
-          if (res.error) {
-            setOutputErr(res.error);
+      if (['python', 'javascript'].includes(activeLanguage)) {
+        let workerFile = activeLanguage === 'python' ? '/workers/pythonWorker.js' : '/workers/jsWorker.js';
+        
+        const worker = new Worker(workerFile);
+        
+        worker.onmessage = (e) => {
+          const { output, error } = e.data;
+          if (error) {
+            setOutputErr(error);
           } else {
-            setOutput(res.output);
+            setOutput(output);
           }
-        } catch (err) {
-          setOutputErr(err.message || 'Execution failed');
-        }
+          setRunning(false);
+          worker.terminate();
+        };
+
+        worker.onerror = (err) => {
+          setOutputErr(err.message || 'Worker execution failed');
+          setRunning(false);
+          worker.terminate();
+        };
+
+        worker.postMessage({ code: content, stdin: stdin });
+        
+        // Safety timeout for worker
+        setTimeout(() => {
+          if (running) {
+            worker.terminate();
+            setOutputErr('Execution Timed Out (Limit: 15s)');
+            setRunning(false);
+          }
+        }, 15000);
+
       } else {
-        setOutputErr(`Execution for ${activeLanguage} is not supported.`);
+        setOutputErr(`Execution for ${activeLanguage} is not supported in the browser.`);
+        setRunning(false);
       }
 
     } catch (e) {
@@ -1485,10 +1496,17 @@ export default function EditorWorkspace() {
                 {/* Auto-detected language indicator */}
                 <div className="mt-2 text-xs flex items-center gap-1.5">
                   {newFileName.trim().includes('.') && newFileName.trim().split('.').pop() ? (
-                    <span className="text-emerald-400 font-medium flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded-md">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      Auto-detected: <strong className="uppercase font-mono">{detectLangFromFilename(newFileName.trim())}</strong>
-                    </span>
+                    detectLangFromFilename(newFileName.trim()) ? (
+                      <span className="text-emerald-400 font-medium flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded-md">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Auto-detected: <strong className="uppercase font-mono">{detectLangFromFilename(newFileName.trim())}</strong>
+                      </span>
+                    ) : (
+                      <span className="text-red-400 font-medium flex items-center gap-1.5 bg-red-500/10 border border-red-500/20 px-2 py-1 rounded-md">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                        Unsupported Extension
+                      </span>
+                    )
                   ) : (
                     <span className="text-zinc-500">
                       Must include extension (e.g. <span className="font-mono text-zinc-400">.js, .py</span>)

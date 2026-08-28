@@ -9,16 +9,6 @@ export const LANGUAGE_OPTIONS = [
     id: 'python',
     label: 'Python',
     ext: 'py',
-  },
-  {
-    id: 'cpp',
-    label: 'C++',
-    ext: 'cpp',
-  },
-  {
-    id: 'java',
-    label: 'Java',
-    ext: 'java',
   }
 ];
 
