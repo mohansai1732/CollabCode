@@ -108,7 +108,7 @@ export default function AdminPage() {
     try {
       await api.post(`/admin/users/${userId}/subscription`, {
         plan: targetPlan,
-        status: isPro ? 'active' : 'active',
+        status: 'active',
         expiresAt: isPro ? new Date(Date.now() + 90 * 86400000).toISOString() : null
       });
 

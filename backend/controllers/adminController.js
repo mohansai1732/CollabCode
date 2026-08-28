@@ -31,7 +31,7 @@ export const getAdminStats = async (req, res) => {
       const usersSnap = await db.collection('users').get();
       usersSnap.docs.forEach(doc => {
         const sub = doc.data()?.subscription;
-        if (sub && (sub.status === 'active' || sub.tier === 'pro' || sub.plan === 'pro')) {
+        if (sub && sub.status === 'active' && (sub.tier === 'pro' || sub.plan === 'pro')) {
           activeSubsCount++;
         }
       });

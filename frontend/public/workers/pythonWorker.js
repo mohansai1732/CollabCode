@@ -45,6 +45,6 @@ __builtins__.input = custom_input
     
     self.postMessage({ output, error: null });
   } catch (err) {
-    self.postMessage({ output: '', error: err.toString() });
+    self.postMessage({ output, error: err.toString() });
   }
 };
