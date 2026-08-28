@@ -9,31 +9,57 @@ export default function AdminRoute() {
   const [adminStatus, setAdminStatus] = useState(null);
 
   useEffect(() => {
-    // Reset when auth state changes
     if (!isLoaded || !isSignedIn || !user) {
       setAdminStatus(null);
       return;
     }
 
-    // 1. Fast path: check Clerk publicMetadata directly
-    if (user.publicMetadata?.role === 'admin') {
-      setAdminStatus(true);
-      return;
+    let cancelled = false;
+
+    async function verifyAdmin() {
+      console.log('[AdminRoute] Verifying admin for user:', user.id);
+      console.log('[AdminRoute] publicMetadata:', JSON.stringify(user.publicMetadata));
+
+      // 1. Fast path: check Clerk publicMetadata directly
+      if (user.publicMetadata?.role === 'admin') {
+        console.log('[AdminRoute] ✅ Admin confirmed via publicMetadata');
+        if (!cancelled) setAdminStatus(true);
+        return;
+      }
+
+      // 2. Force-reload user from Clerk API to get fresh metadata
+      //    (handles stale session cache after metadata was updated in dashboard)
+      try {
+        console.log('[AdminRoute] publicMetadata.role not found, reloading user from Clerk...');
+        await user.reload();
+        console.log('[AdminRoute] Reloaded publicMetadata:', JSON.stringify(user.publicMetadata));
+        if (cancelled) return;
+
+        if (user.publicMetadata?.role === 'admin') {
+          console.log('[AdminRoute] ✅ Admin confirmed after reload');
+          setAdminStatus(true);
+          return;
+        }
+      } catch (reloadErr) {
+        console.warn('[AdminRoute] User reload failed:', reloadErr.message);
+      }
+
+      // 3. Fallback: verify via backend API
+      try {
+        console.log('[AdminRoute] Trying backend fallback /admin/stats...');
+        await api.get('/admin/stats');
+        console.log('[AdminRoute] ✅ Admin confirmed via backend API');
+        if (!cancelled) setAdminStatus(true);
+      } catch (apiErr) {
+        console.warn('[AdminRoute] ❌ Backend admin check failed:', apiErr?.response?.status, apiErr?.response?.data?.error || apiErr.message);
+        if (!cancelled) setAdminStatus(false);
+      }
     }
 
-    // 2. Fallback: verify via backend API (handles cases where
-    //    publicMetadata isn't in the session token / not yet synced)
-    let cancelled = false;
-    api.get('/admin/stats')
-      .then(() => {
-        if (!cancelled) setAdminStatus(true);
-      })
-      .catch(() => {
-        if (!cancelled) setAdminStatus(false);
-      });
+    verifyAdmin();
 
     return () => { cancelled = true; };
-  }, [isLoaded, isSignedIn, user?.id, user?.publicMetadata?.role]);
+  }, [isLoaded, isSignedIn, user?.id]);
 
   // Still loading Clerk
   if (!isLoaded || (isSignedIn && !user)) {
@@ -49,7 +75,7 @@ export default function AdminRoute() {
     return <Navigate to="/" replace />;
   }
 
-  // Still verifying admin status via backend
+  // Still verifying admin status
   if (adminStatus === null) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-zinc-950 text-zinc-400">
@@ -65,4 +91,5 @@ export default function AdminRoute() {
 
   // Render nested admin child routes
   return <Outlet />;
-}
+}
+
