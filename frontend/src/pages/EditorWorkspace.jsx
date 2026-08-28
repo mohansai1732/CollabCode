@@ -18,6 +18,7 @@ import {
   FileCode,
   Plus,
   Trash2,
+  Edit2,
   FileText,
   Folder
 } from 'lucide-react';
@@ -57,9 +58,9 @@ const EXT_TO_LANG = {
   ts: 'typescript',
   tsx: 'typescript',
   py: 'python',
-  java: 'javalatest',
-  cpp: 'cpplatest',
-  c: 'cpplatest',
+  java: 'java',
+  cpp: 'cpp',
+  c: 'cpp',
   cs: 'csharp',
   html: 'html',
   css: 'css',
@@ -114,6 +115,11 @@ export default function EditorWorkspace() {
   const [creatingFile, setCreatingFile] = useState(false);
   const [fileCreateError, setFileCreateError] = useState('');
   const [fileToDelete, setFileToDelete] = useState(null);
+  const [showRenameFileModal, setShowRenameFileModal] = useState(false);
+  const [fileToRename, setFileToRename] = useState(null);
+  const [renameFileName, setRenameFileName] = useState('');
+  const [renamingFile, setRenamingFile] = useState(false);
+  const [fileRenameError, setFileRenameError] = useState('');
 
   // Workspace, editor & chat states
   const [output, setOutput] = useState('');
@@ -139,8 +145,8 @@ export default function EditorWorkspace() {
   }, [files, activeFileId]);
 
   const activeLanguage = useMemo(() => {
-    return activeFile?.language || 'python';
-  }, [activeFile]);
+    return detectLangFromFilename(activeFile?.filename);
+  }, [activeFile?.filename]);
 
   // Component Refs
   const editorRef = useRef(null);
@@ -544,8 +550,6 @@ export default function EditorWorkspace() {
     const uri = monacoNs.Uri.parse(`file:///${roomId}/${file.id}/${file.filename}`);
 
     let monacoLang = lang;
-    if (['cpp14', 'cpplatest'].includes(lang)) monacoLang = 'cpp';
-    if (['java11', 'javalatest'].includes(lang)) monacoLang = 'java';
 
     let model = monacoNs.editor.getModel(uri);
     if (!model) {
@@ -634,35 +638,7 @@ export default function EditorWorkspace() {
     };
   }, [roomId]);
 
-  // Language Change for Active File
-  const handleLanguageSelect = async (nextLang) => {
-    if (!activeFile) return;
 
-    // Update in local state
-    setFiles(prev => prev.map(f => f.id === activeFile.id ? { ...f, language: nextLang } : f));
-
-    // Update in Yjs
-    if (doc && langs) {
-      doc.transact(() => {
-        langs.set(activeFile.id, nextLang);
-      });
-    }
-
-    // Update in Monaco
-    if (modelRef.current && monacoNsRef.current) {
-      let monacoLang = nextLang;
-      if (['cpp14', 'cpplatest'].includes(nextLang)) monacoLang = 'cpp';
-      if (['java11', 'javalatest'].includes(nextLang)) monacoLang = 'java';
-      monacoNsRef.current.editor.setModelLanguage(modelRef.current, monacoLang);
-    }
-
-    // Update in Firestore
-    try {
-      await updateFile(activeFile.id, roomId, { language: nextLang });
-    } catch (err) {
-      console.warn('Failed to update file language on server:', err.message);
-    }
-  };
 
   // Create New File
   const handleCreateFile = async (e) => {
@@ -712,6 +688,59 @@ export default function EditorWorkspace() {
       setFileCreateError(err.response?.data?.message || err.message || 'Failed to create file');
     } finally {
       setCreatingFile(false);
+    }
+  };
+
+  // Rename File
+  const handleRenameFile = async (e) => {
+    e?.preventDefault();
+    if (!roomId || !fileToRename) return;
+
+    const cleanName = renameFileName.trim();
+    if (!cleanName) {
+      setFileRenameError('Please enter a filename.');
+      return;
+    }
+
+    if (cleanName === fileToRename.filename) {
+      setShowRenameFileModal(false);
+      return;
+    }
+
+    const parts = cleanName.split('.');
+    if (parts.length < 2 || !parts[parts.length - 1].trim()) {
+      setFileRenameError('Please include a valid file extension (e.g. script.js, index.py).');
+      return;
+    }
+
+    setRenamingFile(true);
+    setFileRenameError('');
+
+    try {
+      const chosenLang = detectLangFromFilename(cleanName);
+      
+      const updatedFile = await updateFile(fileToRename.id, roomId, {
+        filename: cleanName,
+        language: chosenLang,
+      });
+
+      // Update local state
+      setFiles(prev => prev.map(f => f.id === updatedFile.id ? updatedFile : f));
+      
+      // Update Yjs language map
+      if (doc && langs) {
+        doc.transact(() => {
+          langs.set(updatedFile.id, chosenLang);
+        });
+      }
+
+      setShowRenameFileModal(false);
+      setFileToRename(null);
+    } catch (err) {
+      console.error('Failed to rename file:', err);
+      setFileRenameError(err.response?.data?.message || err.message || 'Failed to rename file');
+    } finally {
+      setRenamingFile(false);
     }
   };
 
@@ -798,79 +827,7 @@ export default function EditorWorkspace() {
     return () => provider.awareness.off('change', upd);
   }, [provider]);
 
-  // Python Engine (Pyodide)
-  const [pyodide, setPyodide] = useState(null);
 
-  useEffect(() => {
-    if (activeLanguage === 'python' && !pyodide) {
-      const loadPyodide = async () => {
-        try {
-          if (typeof window.loadPyodide !== 'function') {
-            console.warn('Pyodide script not yet loaded from CDN...');
-            return;
-          }
-          console.log('Loading Pyodide engine...');
-          const py = await window.loadPyodide();
-          setPyodide(py);
-          console.log('Pyodide loaded.');
-        } catch (e) {
-          console.error('Failed to load Pyodide:', e);
-        }
-      };
-      const timer = setTimeout(loadPyodide, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [activeLanguage, pyodide]);
-
-  const runJS = (code) => {
-    const logs = [];
-    const originalLog = console.log;
-    const originalError = console.error;
-
-    console.log = (...args) => {
-      logs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' '));
-      originalLog(...args);
-    };
-    console.error = (...args) => {
-      logs.push('Error: ' + args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' '));
-      originalError(...args);
-    };
-
-    try {
-      // Use indirect eval (new Function) to prevent local scope leakage and satisfy bundlers
-      const fn = new Function(code);
-      const result = fn();
-      if (result !== undefined) logs.push(`=> ${result}`);
-      setOutput(logs.join('\n'));
-    } catch (e) {
-      setOutputErr(e.message);
-    } finally {
-      console.log = originalLog;
-      console.error = originalError;
-    }
-  };
-
-  const runPython = async (code) => {
-    if (!pyodide) {
-      setOutputErr('Python engine is still loading... please wait a few seconds.');
-      return;
-    }
-
-    try {
-      pyodide.runPython(`
-        import sys
-        import io
-        sys.stdout = io.StringIO()
-      `);
-
-      await pyodide.runPythonAsync(code);
-
-      const stdout = pyodide.runPython('sys.stdout.getvalue()');
-      setOutput(stdout || 'Python code executed successfully with no output.');
-    } catch (e) {
-      setOutputErr(e.message);
-    }
-  };
 
   const inviteUrl = `${window.location.origin}/join/${roomId}`;
 
@@ -900,11 +857,7 @@ export default function EditorWorkspace() {
         return;
       }
 
-      if (activeLanguage === 'javascript') {
-        runJS(content);
-      } else if (activeLanguage === 'python') {
-        await runPython(content);
-      } else if (['cpp14', 'cpplatest', 'java11', 'javalatest'].includes(activeLanguage)) {
+      if (['cpp', 'java', 'python', 'javascript'].includes(activeLanguage)) {
         try {
           const res = await executeCode(activeLanguage, content, stdin);
           if (res.error) {
@@ -916,7 +869,7 @@ export default function EditorWorkspace() {
           setOutputErr(err.message || 'Execution failed');
         }
       } else {
-        setOutputErr(`In-browser execution for ${activeLanguage} is not supported directly yet.`);
+        setOutputErr(`Execution for ${activeLanguage} is not supported.`);
       }
 
     } catch (e) {
@@ -1185,13 +1138,7 @@ export default function EditorWorkspace() {
             </Button>
           )}
 
-          <select
-            value={activeLanguage}
-            onChange={(e) => handleLanguageSelect(e.target.value)}
-            className="bg-zinc-800 border border-zinc-700 text-sm rounded-lg px-3 py-1.5 outline-none focus:border-blue-500 transition-colors"
-          >
-            {LANGUAGE_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-          </select>
+
 
           <Button size="sm" onClick={handleRun} disabled={running} className="gap-2 bg-green-600 hover:bg-green-700 border-none">
             <Play className="w-4 h-4" />
@@ -1247,19 +1194,34 @@ export default function EditorWorkspace() {
                         <span className="text-[10px] uppercase font-mono text-zinc-500 px-1 py-0.5 rounded bg-zinc-800/50">
                           {file.language || 'code'}
                         </span>
-                        {files.length > 1 && (
+                        <div className="opacity-0 group-hover:opacity-100 transition flex items-center">
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setFileToDelete(file);
+                              setFileToRename(file);
+                              setRenameFileName(file.filename);
+                              setShowRenameFileModal(true);
                             }}
-                            className="text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition p-0.5 rounded hover:bg-zinc-800"
-                            title="Delete file"
+                            className="text-zinc-500 hover:text-blue-400 p-0.5 rounded hover:bg-zinc-800 mr-0.5"
+                            title="Rename file"
                           >
-                            <Trash2 className="w-3 h-3" />
+                            <Edit2 className="w-3 h-3" />
                           </button>
-                        )}
+                          {files.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFileToDelete(file);
+                              }}
+                              className="text-zinc-500 hover:text-red-400 p-0.5 rounded hover:bg-zinc-800"
+                              title="Delete file"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -1370,7 +1332,7 @@ export default function EditorWorkspace() {
             <Editor
               height="100%"
               theme="vs-dark"
-              language={['cpp14', 'cpplatest'].includes(activeLanguage) ? 'cpp' : (['java11', 'javalatest'].includes(activeLanguage) ? 'java' : activeLanguage)}
+              language={activeLanguage}
               onMount={handleEditorMount}
               options={{
                 minimap: { enabled: false },
@@ -1556,6 +1518,76 @@ export default function EditorWorkspace() {
                   className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm text-white font-medium transition shadow-lg shadow-indigo-600/30 disabled:opacity-50 cursor-pointer"
                 >
                   {creatingFile ? 'Creating...' : 'Create File'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Rename File */}
+      {showRenameFileModal && fileToRename && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
+          <div className="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-zinc-800 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Edit2 className="w-5 h-5 text-blue-400" />
+                Rename File
+              </h2>
+            </div>
+
+            <form onSubmit={handleRenameFile} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-widest mb-2">
+                  New Filename
+                </label>
+                <input
+                  type="text"
+                  value={renameFileName}
+                  onChange={(e) => {
+                    setRenameFileName(e.target.value);
+                    setFileRenameError('');
+                  }}
+                  placeholder="e.g. script.js, index.py"
+                  autoFocus
+                  required
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:border-blue-500 focus:outline-none transition font-mono"
+                />
+
+                <div className="mt-2 text-xs flex items-center gap-1.5">
+                  {renameFileName.trim().includes('.') && renameFileName.trim().split('.').pop() ? (
+                    <span className="text-blue-400 font-medium flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 px-2 py-1 rounded-md">
+                      Auto-detected: <strong className="uppercase font-mono">{detectLangFromFilename(renameFileName.trim())}</strong>
+                    </span>
+                  ) : (
+                    <span className="text-zinc-500">
+                      Must include extension (e.g. <span className="font-mono text-zinc-400">.js, .py</span>)
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {fileRenameError && (
+                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium">
+                  {fileRenameError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRenameFileModal(false)}
+                  disabled={renamingFile}
+                  className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-300 font-medium transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={renamingFile || !renameFileName.trim()}
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm text-white font-medium transition shadow-lg shadow-blue-600/30 disabled:opacity-50 cursor-pointer"
+                >
+                  {renamingFile ? 'Renaming...' : 'Rename File'}
                 </button>
               </div>
             </form>

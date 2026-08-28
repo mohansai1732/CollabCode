@@ -11,23 +11,13 @@ export const LANGUAGE_OPTIONS = [
     ext: 'py',
   },
   {
-    id: 'cpp14',
-    label: 'C++ 14',
+    id: 'cpp',
+    label: 'C++',
     ext: 'cpp',
   },
   {
-    id: 'cpplatest',
-    label: 'C++ 20',
-    ext: 'cpp',
-  },
-  {
-    id: 'java11',
-    label: 'Java 11',
-    ext: 'java',
-  },
-  {
-    id: 'javalatest',
-    label: 'Java 21',
+    id: 'java',
+    label: 'Java',
     ext: 'java',
   }
 ];

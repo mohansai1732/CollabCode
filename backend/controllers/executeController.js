@@ -14,7 +14,7 @@ export async function executeCode(req, res) {
     return res.status(400).json({ error: 'Language and code are required.' });
   }
 
-  const supportedLanguages = ['cpp14', 'cpplatest', 'java11', 'javalatest'];
+  const supportedLanguages = ['cpp', 'java', 'python', 'javascript'];
   if (!supportedLanguages.includes(language)) {
     return res.status(400).json({ error: `Language ${language} is not supported by the backend execution engine.` });
   }
@@ -32,16 +32,18 @@ export async function executeCode(req, res) {
     // Docker Desktop on Windows handles standard paths, but it's safer to use forward slashes
     const mountPath = tempDir.replace(/\\/g, '/');
 
-    if (language === 'cpp14' || language === 'cpplatest') {
+    if (language === 'cpp') {
       fileName = 'main.cpp';
-      const stdFlag = language === 'cpp14' ? '-std=c++14' : '-std=c++20';
-      runCommand = `docker run --rm -v "${mountPath}:/app" -w /app gcc:latest bash -c "g++ ${stdFlag} main.cpp && ./a.out < input.txt"`;
-    } else if (language === 'java11') {
+      runCommand = `docker run --rm -v "${mountPath}:/app" -w /app gcc:latest bash -c "g++ -std=c++20 main.cpp && ./a.out < input.txt"`;
+    } else if (language === 'java') {
       fileName = 'Main.java';
-      runCommand = `docker run --rm -v "${mountPath}:/app" -w /app openjdk:11 bash -c "javac Main.java && java Main < input.txt"`;
-    } else if (language === 'javalatest') {
-      fileName = 'Main.java';
-      runCommand = `docker run --rm -v "${mountPath}:/app" -w /app openjdk:latest bash -c "javac Main.java && java Main < input.txt"`;
+      runCommand = `docker run --rm -v "${mountPath}:/app" -w /app eclipse-temurin:21-jdk bash -c "javac Main.java && java Main < input.txt"`;
+    } else if (language === 'python') {
+      fileName = 'main.py';
+      runCommand = `docker run --rm -v "${mountPath}:/app" -w /app python:latest bash -c "python main.py < input.txt"`;
+    } else if (language === 'javascript') {
+      fileName = 'main.js';
+      runCommand = `docker run --rm -v "${mountPath}:/app" -w /app node:latest bash -c "node main.js < input.txt"`;
     }
 
     // Normalize line endings to Linux format (LF) to prevent issues inside the Linux container

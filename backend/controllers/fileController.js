@@ -7,24 +7,9 @@ function valid(value) {
 
 const EXT_TO_LANG = {
   js: 'javascript',
-  jsx: 'javascript',
-  ts: 'typescript',
-  tsx: 'typescript',
   py: 'python',
-  java: 'javalatest',
-  cpp: 'cpplatest',
-  c: 'cpplatest',
-  cs: 'csharp',
-  html: 'html',
-  css: 'css',
-  json: 'json',
-  md: 'markdown',
-  sql: 'sql',
-  rust: 'rust',
-  rs: 'rust',
-  go: 'go',
-  php: 'php',
-  rb: 'ruby',
+  java: 'java',
+  cpp: 'cpp',
 };
 
 function detectLanguage(filename, explicitLang) {
@@ -125,8 +110,16 @@ export async function createFile(req, res, next) {
     // Validate that filename includes an extension
     const parts = cleanFilename.split('.');
     if (parts.length < 2 || !parts[parts.length - 1].trim()) {
-      return res.status(400).json({ 
-        message: 'Please include a valid file extension (e.g. script.js, index.py).' 
+      return res.status(400).json({
+        message: 'Please include a valid file extension (e.g. script.js, index.py).'
+      });
+    }
+
+    const ext = parts[parts.length - 1].trim().toLowerCase();
+    const allowedExtensions = ['js', 'py', 'cpp', 'java'];
+    if (!allowedExtensions.includes(ext)) {
+      return res.status(400).json({
+        message: 'no extensions found or lanagues not supported'
       });
     }
 
@@ -190,6 +183,21 @@ export async function updateFile(req, res, next) {
       const cleanFilename = String(filename).trim();
       if (!cleanFilename) {
         return res.status(400).json({ message: 'Filename cannot be empty.' });
+      }
+
+      const parts = cleanFilename.split('.');
+      if (parts.length < 2 || !parts[parts.length - 1].trim()) {
+        return res.status(400).json({
+          message: 'Please include a valid file extension (e.g. script.js, index.py , main.java , main.cpp).'
+        });
+      }
+
+      const ext = parts[parts.length - 1].trim().toLowerCase();
+      const allowedExtensions = ['js', 'py', 'cpp', 'java'];
+      if (!allowedExtensions.includes(ext)) {
+        return res.status(400).json({
+          message: 'no extensions found or lanagues not supported'
+        });
       }
 
       // If renaming, check for conflict

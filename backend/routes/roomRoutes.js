@@ -33,9 +33,9 @@ router.post('/', rateLimit(), createRoom);
 
 router.post('/join', rateLimit(), requestJoin);
 
-router.get('/:roomId/requests', listRequests);
-
 router.get('/my-requests/:userId', fetchMyRequests);
+
+router.get('/:roomId/requests', listRequests);
 
 router.get('/invite/:roomId', getRoomInviteInfo);
 
