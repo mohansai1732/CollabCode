@@ -19,7 +19,7 @@ import { isMember } from './controllers/roomController.js';
 // Initialize express application
 const app = express();
 
-const clientOrigin = process.env.CLIENT_ORIGIN || process.env.VITE_CLIENT_URL || 'http://localhost:5173';
+const clientOrigin = process.env.CLIENT_ORIGIN || process.env.CLIENT_URL || process.env.VITE_CLIENT_URL || 'http://localhost:5173';
 
 /**
  * CORS Configuration: Security policy that checks if the request comes from an allowed frontend domain.
