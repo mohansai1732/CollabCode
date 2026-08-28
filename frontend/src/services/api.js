@@ -33,7 +33,7 @@ api.interceptors.request.use(
       }
     }
 
-    if (clerkUserGetter) {
+    if (clerkUserGetter && config.url && config.url.includes('/admin')) {
       try {
         const user = typeof clerkUserGetter === 'function' ? clerkUserGetter() : clerkUserGetter;
         if (user?.publicMetadata?.role) {
