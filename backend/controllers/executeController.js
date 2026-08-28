@@ -28,22 +28,18 @@ export async function executeCode(req, res) {
     let fileName = '';
     let runCommand = '';
 
-    // Convert Windows path to Docker compatible format if needed
-    // Docker Desktop on Windows handles standard paths, but it's safer to use forward slashes
-    const mountPath = tempDir.replace(/\\/g, '/');
-
     if (language === 'cpp') {
       fileName = 'main.cpp';
-      runCommand = `docker run --rm -v "${mountPath}:/app" -w /app gcc:latest bash -c "g++ -std=c++20 main.cpp && ./a.out < input.txt"`;
+      runCommand = `sudo -u coderunner timeout 15s bash -c "cd ${tempDir} && g++ -std=c++20 main.cpp && ./a.out < input.txt"`;
     } else if (language === 'java') {
       fileName = 'Main.java';
-      runCommand = `docker run --rm -v "${mountPath}:/app" -w /app eclipse-temurin:21-jdk bash -c "javac Main.java && java Main < input.txt"`;
+      runCommand = `sudo -u coderunner timeout 15s bash -c "cd ${tempDir} && javac Main.java && java Main < input.txt"`;
     } else if (language === 'python') {
       fileName = 'main.py';
-      runCommand = `docker run --rm -v "${mountPath}:/app" -w /app python:latest bash -c "python main.py < input.txt"`;
+      runCommand = `sudo -u coderunner timeout 15s bash -c "cd ${tempDir} && python3 main.py < input.txt"`;
     } else if (language === 'javascript') {
       fileName = 'main.js';
-      runCommand = `docker run --rm -v "${mountPath}:/app" -w /app node:latest bash -c "node main.js < input.txt"`;
+      runCommand = `sudo -u coderunner timeout 15s bash -c "cd ${tempDir} && node main.js < input.txt"`;
     }
 
     // Normalize line endings to Linux format (LF) to prevent issues inside the Linux container
@@ -54,28 +50,34 @@ export async function executeCode(req, res) {
     await fs.writeFile(path.join(tempDir, fileName), normalizedCode);
     await fs.writeFile(path.join(tempDir, 'input.txt'), normalizedStdin);
 
-    // Execute in Docker with a timeout of 15 seconds
+    // Give coderunner full ownership of the temp directory so it can compile and write output files
+    await execPromise(`sudo chown -R coderunner:coderunner "${tempDir}"`);
+
+    // Execute as restricted user with a timeout
     const { stdout, stderr } = await execPromise(runCommand, { timeout: 15000 });
 
     res.json({ output: stdout, error: stderr });
   } catch (error) {
     console.error('Execution error:', error);
-    
+
     // Determine if it's a timeout, compilation error, or runtime error
     let errorMessage = error.message;
     if (error.killed && error.signal === 'SIGTERM') {
+      errorMessage = 'Execution Timed Out (Limit: 15s)';
+    } else if (errorMessage.includes('124')) { // Linux timeout command exit code is 124
       errorMessage = 'Execution Timed Out (Limit: 15s)';
     } else if (error.stderr) {
       errorMessage = error.stderr; // Usually compilation or runtime error
     } else if (error.stdout) {
       errorMessage = error.stdout;
     }
-    
+
     res.json({ output: '', error: errorMessage });
   } finally {
     // Cleanup
     try {
-      await fs.rm(tempDir, { recursive: true, force: true });
+      // Must use sudo to delete because the directory is now owned by coderunner
+      await execPromise(`sudo rm -rf "${tempDir}"`);
     } catch (cleanupError) {
       console.error(`Failed to cleanup temp directory: ${tempDir}`, cleanupError);
     }
