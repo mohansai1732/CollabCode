@@ -28,14 +28,29 @@ function corsOrigin(origin, callback) {
   if (!origin) {
     return callback(null, true); // Allow server-to-server or Postman requests without origin header
   }
-  const isLocalhost = /^http:\/\/localhost:\d+$/.test(origin);
-  const isConfiguredClient = origin === clientOrigin;
-
-  if (isLocalhost || isConfiguredClient) {
-    callback(null, true); // Allow connection
-  } else {
-    callback(null, false); // Block unauthorized origins safely
+  
+  // Allow localhost
+  if (/^http:\/\/localhost:\d+$/.test(origin)) {
+    return callback(null, true);
   }
+
+  // Allow explicitly configured client
+  if (clientOrigin && origin.replace(/\/$/, '') === clientOrigin.replace(/\/$/, '')) {
+    return callback(null, true);
+  }
+
+  // Allow Render domains (production convenience)
+  if (origin.endsWith('.onrender.com')) {
+    return callback(null, true);
+  }
+  
+  // Allow Vercel & Netlify (production convenience)
+  if (origin.endsWith('.vercel.app') || origin.endsWith('.netlify.app')) {
+    return callback(null, true);
+  }
+
+  console.warn(`Blocked CORS request from origin: ${origin}`);
+  callback(null, false); // Block unauthorized origins safely
 }
 
 // Attach CORS middleware to Express app
