@@ -30,16 +30,16 @@ export async function executeCode(req, res) {
 
     if (language === 'cpp') {
       fileName = 'main.cpp';
-      runCommand = `sudo -u coderunner timeout 15s bash -c "cd ${tempDir} && g++ -std=c++20 main.cpp && ./a.out < input.txt"`;
+      runCommand = `/usr/bin/sudo -u coderunner timeout 15s bash -c "cd ${tempDir} && g++ -std=c++20 main.cpp && ./a.out < input.txt"`;
     } else if (language === 'java') {
       fileName = 'Main.java';
-      runCommand = `sudo -u coderunner timeout 15s bash -c "cd ${tempDir} && javac Main.java && java Main < input.txt"`;
+      runCommand = `/usr/bin/sudo -u coderunner timeout 15s bash -c "cd ${tempDir} && javac Main.java && java Main < input.txt"`;
     } else if (language === 'python') {
       fileName = 'main.py';
-      runCommand = `sudo -u coderunner timeout 15s bash -c "cd ${tempDir} && python3 main.py < input.txt"`;
+      runCommand = `/usr/bin/sudo -u coderunner timeout 15s bash -c "cd ${tempDir} && python3 main.py < input.txt"`;
     } else if (language === 'javascript') {
       fileName = 'main.js';
-      runCommand = `sudo -u coderunner timeout 15s bash -c "cd ${tempDir} && node main.js < input.txt"`;
+      runCommand = `/usr/bin/sudo -u coderunner timeout 15s bash -c "cd ${tempDir} && node main.js < input.txt"`;
     }
 
     // Normalize line endings to Linux format (LF) to prevent issues inside the Linux container
@@ -51,7 +51,7 @@ export async function executeCode(req, res) {
     await fs.writeFile(path.join(tempDir, 'input.txt'), normalizedStdin);
 
     // Give coderunner full ownership of the temp directory so it can compile and write output files
-    await execPromise(`sudo chown -R coderunner:coderunner "${tempDir}"`);
+    await execPromise(`/usr/bin/sudo chown -R coderunner:coderunner "${tempDir}"`);
 
     // Execute as restricted user with a timeout
     const { stdout, stderr } = await execPromise(runCommand, { timeout: 15000 });
@@ -77,7 +77,7 @@ export async function executeCode(req, res) {
     // Cleanup
     try {
       // Must use sudo to delete because the directory is now owned by coderunner
-      await execPromise(`sudo rm -rf "${tempDir}"`);
+      await execPromise(`/usr/bin/sudo rm -rf "${tempDir}"`);
     } catch (cleanupError) {
       console.error(`Failed to cleanup temp directory: ${tempDir}`, cleanupError);
     }
