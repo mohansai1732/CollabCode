@@ -7,11 +7,7 @@ export default function ProtectedRoute() {
 
   // Show a loading state while Clerk initializes session state
   if (!isLoaded) {
-    return (
-      <div className="flex h-screen w-full items-center justify-center bg-zinc-950 text-zinc-400">
-        Loading...
-      </div>
-    );
+    return null; // Return null instead of a loading screen for better UX
   }
 
   // If not signed in, redirect to home/landing page

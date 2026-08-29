@@ -32,7 +32,7 @@ export default function App() {
       <BrowserRouter>
         {/* Placed inside BrowserRouter to maintain clean context execution */}
         <AxiosAuthBridge />
-        
+
         <Routes>
           {/* Public Route */}
           <Route path="/" element={<LandingPage />} />
@@ -51,7 +51,7 @@ export default function App() {
           </Route>
 
           {/* Global Fallback Route */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* <Route path="*" element={<Navigate to="/" replace />} /> */}
         </Routes>
       </BrowserRouter>
     </div>

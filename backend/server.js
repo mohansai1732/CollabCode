@@ -7,7 +7,6 @@ import cors from 'cors';
 import routes from './routes/index.js';
 import adminRoutes from './routes/adminRoutes.js';
 import { clerkMiddleware } from '@clerk/express';
-
 import { Server } from 'socket.io';
 import { YSocketIO } from 'y-socket.io/dist/server';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -16,44 +15,27 @@ import { validId } from './utils/validation.js';
 import { db } from './config/firebaseAdmin.js';
 import { isMember } from './controllers/roomController.js';
 
-// Initialize express application
 const app = express();
 
-const clientOrigin = process.env.CLIENT_ORIGIN || process.env.CLIENT_URL || process.env.VITE_CLIENT_URL || 'http://localhost:5173';
+// Basic HTTP Request Logger
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
 
-/**
- * CORS Configuration: Security policy that checks if the request comes from an allowed frontend domain.
- */
 function corsOrigin(origin, callback) {
   if (!origin) {
-    return callback(null, true); // Allow server-to-server or Postman requests without origin header
-  }
-  
-  // Allow localhost
-  if (/^http:\/\/localhost:\d+$/.test(origin)) {
     return callback(null, true);
   }
 
-  // Allow explicitly configured client
-  if (clientOrigin && origin.replace(/\/$/, '') === clientOrigin.replace(/\/$/, '')) {
-    return callback(null, true);
-  }
-
-  // Allow Render domains (production convenience)
-  if (origin.endsWith('.onrender.com')) {
-    return callback(null, true);
-  }
-  
-  // Allow Vercel & Netlify (production convenience)
-  if (origin.endsWith('.vercel.app') || origin.endsWith('.netlify.app')) {
+  if (process.env.CLIENT_URL && origin.replace(/\/$/, '') === process.env.CLIENT_URL.replace(/\/$/, '')) {
     return callback(null, true);
   }
 
   console.warn(`Blocked CORS request from origin: ${origin}`);
-  callback(null, false); // Block unauthorized origins safely
+  callback(null, false);
 }
 
-// Attach CORS middleware to Express app
 app.use(
   cors({
     origin: corsOrigin,
@@ -63,12 +45,9 @@ app.use(
   }),
 );
 
-// Enable JSON body parsing for incoming requests (limit 4mb for code files)
-app.use(express.json({ limit: '4mb' }));
+app.use(express.json({ limit: process.env.JSON_LIMIT }));
 
-// Attach Clerk authentication middleware safely
 app.use((req, res, next) => {
-  // Extract and decode JWT Bearer token if present
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
@@ -83,11 +62,9 @@ app.use((req, res, next) => {
         };
       }
     } catch (e) {
-      // Ignore malformed JWT
     }
   }
 
-  // If Clerk Secret Key is provided, use official clerkMiddleware
   if (process.env.CLERK_SECRET_KEY) {
     return clerkMiddleware()(req, res, next);
   }
@@ -95,20 +72,15 @@ app.use((req, res, next) => {
   next();
 });
 
-// Attach REST API routes (placed AFTER cors and express.json)
 app.use('/api/admin', adminRoutes);
 app.use('/api', routes);
-
-// Attach global error handler for any uncaught errors in routes
 app.use(errorHandler);
 
-// Create standard Node.js HTTP server wrapped around our Express app
 const server = http.createServer(app);
 
-// Initialize Socket.IO server on top of HTTP server for real-time websocket connections
 const io = new Server(server, {
   cors: {
-    origin: true, // Allow frontend socket connection
+    origin: true,
     credentials: true,
     methods: ['GET', 'POST'],
   },
@@ -116,27 +88,21 @@ const io = new Server(server, {
 });
 setIO(io);
 
-// Initialize Yjs real-time collaborative editing server over Socket.IO
 const ysocketio = new YSocketIO(io, { gcEnabled: true });
 ysocketio.initialize();
 
-/**
- * Helper function: Broadcasts how many users are currently connected in a room
- */
 function emitAppRoomCount(ioInstance, roomId) {
   const room = `app:${roomId}`;
   const size = ioInstance.sockets.adapter.rooms.get(room)?.size ?? 0;
   ioInstance.to(room).emit('room:count', { count: size });
 }
 
-/**
- * Real-Time Socket.IO event listeners for Room Presence and Live Chat
- */
 io.on('connection', (socket) => {
+  console.log(`[Socket.IO] New connection established: ${socket.id}`);
   let joinedRoom = null;
 
-  // Listen when a user joins a specific room
   socket.on('room:join', async ({ roomId, userId }) => {
+    console.log(`[Socket.IO] User ${userId} attempting to join room ${roomId} on socket ${socket.id}`);
     if (!validId(roomId) || !validId(userId)) return socket.emit('room:error', { message: 'A valid roomId and userId are required.' });
 
     socket.userId = String(userId);
@@ -163,10 +129,11 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Listen when a user sends a chat message in the room
   socket.on('chat:message', async (payload) => {
     const rid = String(payload?.roomId || joinedRoom || '');
     if (!rid) return;
+
+    console.log(`[Socket.IO] Chat message received in room ${rid} from user ${payload.user || 'Guest'}`);
 
     const text = String(payload?.text || '').trim().slice(0, 4000);
     if (!text) return;
@@ -178,10 +145,8 @@ io.on('connection', (socket) => {
       ts: Date.now(),
     };
 
-    // Broadcast message live to all active collaborators in the room
     io.to(`app:${rid}`).emit('chat:message', msg);
 
-    // Save chat message asynchronously to Cloud Firestore database
     try {
       await db.collection('rooms').doc(rid).collection('messages').add(msg);
     } catch (err) {
@@ -189,7 +154,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle user disconnect (updating live user count)
   socket.on('disconnecting', () => {
     if (!joinedRoom) return;
     const rid = joinedRoom;
@@ -197,10 +161,13 @@ io.on('connection', (socket) => {
       emitAppRoomCount(io, rid);
     });
   });
+
+  socket.on('disconnect', () => {
+    console.log(`[Socket.IO] Socket disconnected: ${socket.id}`);
+  });
 });
 
-// Start listening on configured PORT (default: 5001)
-const PORT = Number(process.env.PORT) || 5001;
+const PORT = process.env.PORT;
 
 server.listen(PORT, () => {
   console.log(`API server running on port ${PORT}`);
