@@ -9,7 +9,12 @@ const EXT_TO_LANG = {
   js: 'javascript',
   py: 'python',
   java: 'java',
+  c: 'c',
   cpp: 'cpp',
+  cc: 'cpp',
+  cxx: 'cpp',
+  h: 'c',
+  hpp: 'cpp',
 };
 
 function detectLanguage(filename, explicitLang) {
@@ -43,21 +48,29 @@ export async function listFiles(req, res, next) {
 
     if (snapshot.empty) {
       // Create initial default file for room if none exist
-      let defaultLang = 'python';
-      let defaultFilename = 'main.py';
+      let defaultLang = 'javascript';
+      let defaultFilename = 'main.js';
 
       if (roomData?.language) {
-        defaultLang = roomData.language;
-        if (defaultLang === 'javascript') {
+        const rLang = String(roomData.language).toLowerCase();
+        if (['javascript', 'js'].includes(rLang)) {
+          defaultLang = 'javascript';
           defaultFilename = 'main.js';
-        } else if (defaultLang === 'python') {
+        } else if (['python', 'py'].includes(rLang)) {
+          defaultLang = 'python';
           defaultFilename = 'main.py';
-        } else if (['cpp14', 'cpplatest'].includes(defaultLang)) {
+        } else if (['cpp', 'c++', 'cpp14', 'cpplatest'].includes(rLang)) {
+          defaultLang = 'cpp';
           defaultFilename = 'main.cpp';
-        } else if (['java11', 'javalatest'].includes(defaultLang)) {
+        } else if (['c'].includes(rLang)) {
+          defaultLang = 'c';
+          defaultFilename = 'main.c';
+        } else if (['java', 'java11', 'javalatest'].includes(rLang)) {
+          defaultLang = 'java';
           defaultFilename = 'Main.java';
         } else {
-          defaultFilename = 'main.txt';
+          defaultLang = 'javascript';
+          defaultFilename = 'main.js';
         }
       }
 
@@ -116,10 +129,10 @@ export async function createFile(req, res, next) {
     }
 
     const ext = parts[parts.length - 1].trim().toLowerCase();
-    const allowedExtensions = ['js', 'py', 'cpp', 'java'];
+    const allowedExtensions = Object.keys(EXT_TO_LANG);
     if (!allowedExtensions.includes(ext)) {
       return res.status(400).json({
-        message: 'no extensions found or lanagues not supported'
+        message: `Extension .${ext} is not supported. Supported extensions: ${allowedExtensions.map(e => '.' + e).join(', ')}`
       });
     }
 
@@ -193,10 +206,10 @@ export async function updateFile(req, res, next) {
       }
 
       const ext = parts[parts.length - 1].trim().toLowerCase();
-      const allowedExtensions = ['js', 'py', 'cpp', 'java'];
+      const allowedExtensions = Object.keys(EXT_TO_LANG);
       if (!allowedExtensions.includes(ext)) {
         return res.status(400).json({
-          message: 'no extensions found or lanagues not supported'
+          message: `Extension .${ext} is not supported. Supported extensions: ${allowedExtensions.map(e => '.' + e).join(', ')}`
         });
       }
 

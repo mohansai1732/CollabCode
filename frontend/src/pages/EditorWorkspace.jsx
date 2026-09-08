@@ -25,7 +25,8 @@ import {
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useYjsRoom } from '@/hooks/useYjsRoom';
 import { useChatSocket } from '@/hooks/useChatSocket';
-import { getLanguageOption, LANGUAGE_OPTIONS } from '@/utils/languages';
+import { getLanguageOption, LANGUAGE_OPTIONS, getLanguageBoilerplate } from '@/utils/languages';
+import { executeCode } from '@/services/executionApi';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 
@@ -50,10 +51,15 @@ import {
 
 const COLORS = ['#38bdf8', '#a78bfa', '#f472b6', '#34d399', '#fbbf24'];
 
-// Strictly lock down the IDE to only support these exact extensions
+// Supported IDE extensions mapped to languages
 const EXT_TO_LANG = {
   js: 'javascript',
   py: 'python',
+  c: 'c',
+  cpp: 'cpp',
+  cc: 'cpp',
+  cxx: 'cpp',
+  java: 'java',
 };
 
 function detectLangFromFilename(name) {
@@ -440,6 +446,26 @@ export default function EditorWorkspace() {
     return COLORS[Math.abs(hash) % COLORS.length];
   }, [displayName]);
 
+  // Handle execution output broadcasted from any collaborator in the room
+  const handleRemoteCodeOutput = useCallback((data) => {
+    if (!data) return;
+    setActiveTab('output');
+    if (data.compileError) {
+      setOutput('');
+      setOutputErr(`[Compilation Error]\n${data.compileError}`);
+    } else {
+      const timeInfo = data.executionTimeMs !== undefined 
+        ? `\n\n[Process completed in ${data.executionTimeMs}ms with exit code ${data.exitCode}]`
+        : '';
+      setOutput((data.stdout || '') + (data.stdout ? '' : 'Program finished with no output.') + timeInfo);
+      if (data.stderr) {
+        setOutputErr(data.stderr);
+      } else {
+        setOutputErr('');
+      }
+    }
+  }, []);
+
   const { peerCount, messages, sendMessage } = useChatSocket(
     hasAccess && !removedInfo.isRemoved ? roomId : null,
     displayName,
@@ -448,6 +474,7 @@ export default function EditorWorkspace() {
       onMemberUpdated: handleMemberUpdated,
       onMemberRemoved: handleMemberRemoved,
       onRoomRemoved: handleRoomRemoved,
+      onCodeOutput: handleRemoteCodeOutput,
     }
   );
 
@@ -502,7 +529,7 @@ export default function EditorWorkspace() {
               t.insert(0, file.content);
             }
             if (!langs.has(file.id)) {
-              langs.set(file.id, file.language || 'python');
+              langs.set(file.id, file.language || detectLangFromFilename(file.filename) || 'javascript');
             }
           });
         });
@@ -528,10 +555,23 @@ export default function EditorWorkspace() {
     }
 
     const ytext = doc.getText(file.id);
-    const lang = file.language || langs?.get(file.id) || 'javascript';
+    const lang = file.language || langs?.get(file.id) || detectLangFromFilename(file.filename) || 'javascript';
     const uri = monacoNs.Uri.parse(`file:///${roomId}/${file.id}/${file.filename}`);
 
-    let monacoLang = lang;
+    const MONACO_LANG_MAP = {
+      js: 'javascript',
+      javascript: 'javascript',
+      py: 'python',
+      python: 'python',
+      c: 'c',
+      cpp: 'cpp',
+      cc: 'cpp',
+      cxx: 'cpp',
+      h: 'c',
+      hpp: 'cpp',
+      java: 'java',
+    };
+    const monacoLang = MONACO_LANG_MAP[lang] || lang || 'javascript';
 
     let model = monacoNs.editor.getModel(uri);
     if (!model) {
@@ -649,11 +689,12 @@ export default function EditorWorkspace() {
     setFileCreateError('');
 
     try {
+      const initialTemplate = getLanguageBoilerplate(chosenLang);
       const newFile = await createFile({
         roomId,
         filename: cleanName,
         language: chosenLang,
-        content: '',
+        content: initialTemplate,
       });
 
       // Update local state
@@ -664,6 +705,10 @@ export default function EditorWorkspace() {
       if (doc && langs) {
         doc.transact(() => {
           langs.set(newFile.id, chosenLang);
+          const t = doc.getText(newFile.id);
+          if (t.length === 0 && initialTemplate) {
+            t.insert(0, initialTemplate);
+          }
         });
       }
 
@@ -829,7 +874,7 @@ export default function EditorWorkspace() {
     try {
       setRunning(true);
       setActiveTab('output');
-      setOutput('Starting execution...\n');
+      setOutput('Dispatching to isolated execution sandbox...\n');
       setOutputErr('');
 
       if (!doc || !activeFile) {
@@ -845,47 +890,32 @@ export default function EditorWorkspace() {
         return;
       }
 
-      if (['python', 'javascript'].includes(activeLanguage)) {
-        let workerFile = activeLanguage === 'python' ? '/workers/pythonWorker.js' : '/workers/jsWorker.js';
-        
-        const worker = new Worker(workerFile);
-        
-        worker.onmessage = (e) => {
-          const { output, error } = e.data;
-          if (error) {
-            setOutputErr(error);
-          } else {
-            setOutput(output);
-          }
-          setRunning(false);
-          worker.terminate();
-        };
+      const response = await executeCode({
+        roomId,
+        language: activeLanguage,
+        code: content,
+        stdin: stdin || '',
+        broadcast: true,
+      });
 
-        worker.onerror = (err) => {
-          setOutputErr(err.message || 'Worker execution failed');
-          setRunning(false);
-          worker.terminate();
-        };
-
-        worker.postMessage({ code: content, stdin: stdin });
-        
-        // Safety timeout for worker
-        setTimeout(() => {
-          if (running) {
-            worker.terminate();
-            setOutputErr('Execution Timed Out (Limit: 15s)');
-            setRunning(false);
-          }
-        }, 15000);
-
+      if (response.compileError) {
+        setOutput('');
+        setOutputErr(`[Compilation Error]\n${response.compileError}`);
       } else {
-        setOutputErr(`Execution for ${activeLanguage} is not supported in the browser.`);
-        setRunning(false);
+        const timeInfo = response.executionTimeMs !== undefined 
+          ? `\n\n[Process completed in ${response.executionTimeMs}ms with exit code ${response.exitCode}]`
+          : '';
+        setOutput((response.stdout || '') + (response.stdout ? '' : 'Program finished with no output.') + timeInfo);
+        if (response.stderr) {
+          setOutputErr(response.stderr);
+        } else {
+          setOutputErr('');
+        }
       }
-
     } catch (e) {
       console.error('Run error:', e);
-      setOutputErr(e.message || 'Execution failed');
+      const errMsg = e.response?.data?.message || e.response?.data?.error || e.message || 'Execution failed';
+      setOutputErr(errMsg);
     } finally {
       setRunning(false);
     }
@@ -1487,7 +1517,7 @@ export default function EditorWorkspace() {
                     setNewFileName(e.target.value);
                     setFileCreateError('');
                   }}
-                  placeholder="e.g. script.js, index.py"
+                  placeholder="e.g. script.js, index.py, main.cpp, Main.java"
                   autoFocus
                   required
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:border-indigo-500 focus:outline-none transition font-mono"
@@ -1509,7 +1539,7 @@ export default function EditorWorkspace() {
                     )
                   ) : (
                     <span className="text-zinc-500">
-                      Must include extension (e.g. <span className="font-mono text-zinc-400">.js, .py</span>)
+                      Must include extension (e.g. <span className="font-mono text-zinc-400">.js, .py, .c, .cpp, .java</span>)
                     </span>
                   )}
                 </div>
@@ -1566,7 +1596,7 @@ export default function EditorWorkspace() {
                     setRenameFileName(e.target.value);
                     setFileRenameError('');
                   }}
-                  placeholder="e.g. script.js, index.py"
+                  placeholder="e.g. script.js, index.py, main.cpp, Main.java"
                   autoFocus
                   required
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:border-blue-500 focus:outline-none transition font-mono"
@@ -1579,7 +1609,7 @@ export default function EditorWorkspace() {
                     </span>
                   ) : (
                     <span className="text-zinc-500">
-                      Must include extension (e.g. <span className="font-mono text-zinc-400">.js, .py</span>)
+                      Must include extension (e.g. <span className="font-mono text-zinc-400">.js, .py, .c, .cpp, .java</span>)
                     </span>
                   )}
                 </div>

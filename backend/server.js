@@ -28,7 +28,12 @@ function corsOrigin(origin, callback) {
     return callback(null, true);
   }
 
-  if (process.env.CLIENT_URL && origin.replace(/\/$/, '') === process.env.CLIENT_URL.replace(/\/$/, '')) {
+  const allowedOrigins = (process.env.CLIENT_URL || '')
+    .split(',')
+    .map(u => u.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+
+  if (allowedOrigins.length === 0 || allowedOrigins.includes(origin.replace(/\/$/, ''))) {
     return callback(null, true);
   }
 
@@ -45,9 +50,15 @@ app.use(
   }),
 );
 
-app.use(express.json({ limit: process.env.JSON_LIMIT }));
+app.use(express.json({ limit: process.env.JSON_LIMIT || '4mb' }));
 
 app.use((req, res, next) => {
+  // If Clerk is configured, let clerkMiddleware handle token validation cleanly
+  if (process.env.CLERK_SECRET_KEY) {
+    return clerkMiddleware()(req, res, next);
+  }
+
+  // Fallback JWT parser when Clerk secret key is not provided
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
@@ -63,10 +74,6 @@ app.use((req, res, next) => {
       }
     } catch (e) {
     }
-  }
-
-  if (process.env.CLERK_SECRET_KEY) {
-    return clerkMiddleware()(req, res, next);
   }
 
   next();

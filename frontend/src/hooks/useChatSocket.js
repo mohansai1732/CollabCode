@@ -1,20 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = window.location.hostname === 'localhost' ? 'http://localhost:5001' : (import.meta.env.VITE_SOCKET_URL || 'http://localhost:5001');
+const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/+$/, '');
 
 // This is the normal application Socket.IO connection. It intentionally does not
 // carry Yjs updates; document sync remains exclusively in useYjsRoom.
-export function useChatSocket(roomId, displayName, userId, { onMemberUpdated, onMemberRemoved, onRoomRemoved } = {}) {
+export function useChatSocket(roomId, displayName, userId, { onMemberUpdated, onMemberRemoved, onRoomRemoved, onCodeOutput } = {}) {
   const [connected, setConnected] = useState(false);
   const [peerCount, setPeerCount] = useState(1);
   const [messages, setMessages] = useState([]);
   const socketRef = useRef(null);
-  const callbacksRef = useRef({ onMemberUpdated, onMemberRemoved, onRoomRemoved });
+  const callbacksRef = useRef({ onMemberUpdated, onMemberRemoved, onRoomRemoved, onCodeOutput });
 
   useEffect(() => {
-    callbacksRef.current = { onMemberUpdated, onMemberRemoved, onRoomRemoved };
-  }, [onMemberUpdated, onMemberRemoved, onRoomRemoved]);
+    callbacksRef.current = { onMemberUpdated, onMemberRemoved, onRoomRemoved, onCodeOutput };
+  }, [onMemberUpdated, onMemberRemoved, onRoomRemoved, onCodeOutput]);
 
   useEffect(() => {
     if (!roomId || !userId) return;
@@ -33,6 +33,7 @@ export function useChatSocket(roomId, displayName, userId, { onMemberUpdated, on
     const onMemberUpd = data => callbacksRef.current.onMemberUpdated?.(data);
     const onMemberRem = data => callbacksRef.current.onMemberRemoved?.(data);
     const onRoomRem = data => callbacksRef.current.onRoomRemoved?.(data);
+    const onCodeOut = data => callbacksRef.current.onCodeOutput?.(data);
 
     socket.on('connect', onConnect);
     socket.on('reconnect', onConnect);
@@ -41,6 +42,7 @@ export function useChatSocket(roomId, displayName, userId, { onMemberUpdated, on
     socket.on('room:member-updated', onMemberUpd);
     socket.on('room:member-removed', onMemberRem);
     socket.on('room:removed', onRoomRem);
+    socket.on('code:output', onCodeOut);
 
     if (socket.connected) {
       onConnect();
@@ -54,6 +56,7 @@ export function useChatSocket(roomId, displayName, userId, { onMemberUpdated, on
       socket.off('room:member-updated', onMemberUpd);
       socket.off('room:member-removed', onMemberRem);
       socket.off('room:removed', onRoomRem);
+      socket.off('code:output', onCodeOut);
       socket.disconnect();
       socketRef.current = null;
     };

@@ -1,0 +1,26 @@
+services:
+  sandbox:
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile
+    container_name: collabcode-sandbox
+    restart: unless-stopped
+    ports:
+      - "${SANDBOX_PORT:-2000}:${SANDBOX_PORT:-2000}"
+    cap_add:
+      - NET_ADMIN  # Required to apply kernel-level iptables rules for UID 1001 (sandbox_user)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+          pids: 100 # Prevents fork-bomb attacks from exhausting host process limits
+    environment:
+      - PORT=${SANDBOX_PORT:-2000}
+      - NODE_ENV=production
+    networks:
+      - collabcode-net
+
+networks:
+  collabcode-net:
+    driver: bridge

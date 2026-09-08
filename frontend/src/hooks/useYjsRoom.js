@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as Y from 'yjs';
 import { SocketIOProvider } from 'y-socket.io';
 
-const SOCKET_URL = window.location.hostname === 'localhost' 
-  ? 'http://localhost:5001' 
-  : (import.meta.env.VITE_SOCKET_URL || 'http://localhost:5001');
+const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/+$/, '');
 
 /**
  * One Y.Doc + SocketIOProvider per roomId. Cleans up on room change / unmount.

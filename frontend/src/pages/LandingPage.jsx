@@ -78,7 +78,6 @@ export default function LandingPage() {
         </p>
 
         <div className="flex items-center justify-center gap-4 mb-16">
-          <Button variant="secondary" size="lg"><Terminal className="w-5 h-5" />Editor Workspace</Button>
           <SignedOut><SignInButton mode="modal"><span><Button variant="primary" size="lg">Dashboard </Button></span></SignInButton></SignedOut>
           <SignedIn> <Link to="/dashboard"><Button variant="primary" size="lg"> Dashboard </Button></Link></SignedIn>
         </div>
