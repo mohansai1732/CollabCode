@@ -236,7 +236,19 @@ export async function getRoomById(req, res, next) {
     if (!doc.exists) return res.status(404).json({ message: 'Room not found.' });
     const userId = req.userId;
     if (!requireUserId(userId, res)) return;
-    if (!isMember(doc.data(), userId)) return res.status(403).json({ message: 'You are not a collaborator in this room.' });
+    if (!isMember(doc.data(), userId)) {
+      const roomData = doc.data() || {};
+      return res.status(403).json({ 
+        message: 'You are not a collaborator in this room.',
+        room: {
+          id: doc.id,
+          name: roomData.name,
+          ownerId: roomData.ownerId,
+          ownerName: roomData.ownerName || 'Host',
+          language: roomData.language || 'javascript'
+        }
+      });
+    }
     res.json({ room: publicRoom(doc) });
   } catch (error) { next(error); }
 }

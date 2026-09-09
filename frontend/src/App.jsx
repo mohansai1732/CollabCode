@@ -6,6 +6,7 @@ import LandingPage from '@/pages/LandingPage';
 import DashboardPage from '@/pages/DashboardPage';
 import EditorWorkspace from '@/pages/EditorWorkspace';
 import JoinRoomPage from './pages/JoinRoomPage';
+import AuthPage from '@/pages/AuthPage';
 
 import AdminPage from "@/pages/admin/AdminPage";
 
@@ -36,8 +37,14 @@ export default function App() {
           <AxiosAuthBridge />
 
           <Routes>
-            {/* Public Route */}
+            {/* Public Routes */}
             <Route path="/" element={<LandingPage />} />
+            <Route path="/login/*" element={<AuthPage mode="sign-in" />} />
+            <Route path="/login" element={<AuthPage mode="sign-in" />} />
+            <Route path="/sign-in/*" element={<AuthPage mode="sign-in" />} />
+            <Route path="/register/*" element={<AuthPage mode="sign-up" />} />
+            <Route path="/register" element={<AuthPage mode="sign-up" />} />
+            <Route path="/sign-up/*" element={<AuthPage mode="sign-up" />} />
 
             {/* Authenticated Users */}
             <Route element={<ProtectedRoute />}>
