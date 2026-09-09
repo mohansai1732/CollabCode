@@ -19,7 +19,7 @@ function safeText(val, fallback = 'N/A') {
   return String(val);
 }
 
-export default function AdminPage() {
+export default function AdminPage({ onAdminLogout }) {
   const [stats, setStats] = useState({ usersCount: 0, roomsCount: 0, activeSubsCount: 0 });
   const [rooms, setRooms] = useState([]);
   const [users, setUsers] = useState([]);
@@ -176,16 +176,30 @@ export default function AdminPage() {
             <p className="text-sm text-zinc-400 mt-1">CollabCode System Monitoring & Resource Management</p>
           </div>
           
-          <button
-            onClick={fetchData}
-            disabled={loading}
-            className="self-start sm:self-auto inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-sm font-medium rounded-lg text-zinc-200 transition shadow-sm active:scale-95 disabled:opacity-50"
-          >
-            <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.033 8.033 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Refresh Data
-          </button>
+          <div className="flex items-center gap-3 self-start sm:self-auto">
+            <button
+              onClick={fetchData}
+              disabled={loading}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-sm font-medium rounded-lg text-zinc-200 transition shadow-sm active:scale-95 disabled:opacity-50"
+            >
+              <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.033 8.033 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Refresh Data
+            </button>
+
+            {onAdminLogout && (
+              <button
+                onClick={onAdminLogout}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-red-950/40 hover:bg-red-900/60 border border-red-800/50 hover:border-red-700 text-sm font-medium rounded-lg text-red-300 hover:text-white transition shadow-sm active:scale-95"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                Admin Logout
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Global Error Banner */}

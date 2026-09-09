@@ -8,10 +8,9 @@ import EditorWorkspace from '@/pages/EditorWorkspace';
 import JoinRoomPage from './pages/JoinRoomPage';
 import AuthPage from '@/pages/AuthPage';
 
-import AdminPage from "@/pages/admin/AdminPage";
+import AdminGateway from "@/components/AdminGateway";
 
 import ProtectedRoute from '@/components/ProtectedRoute';
-import AdminRoute from '@/components/AdminRoute';
 import ErrorBoundary from '@/components/ErrorBoundary';
 
 import { setClerkTokenGetter } from '@/services/api';
@@ -46,17 +45,14 @@ export default function App() {
             <Route path="/register" element={<AuthPage mode="sign-up" />} />
             <Route path="/sign-up/*" element={<AuthPage mode="sign-up" />} />
 
+            {/* Admin Gateway (Accessible to anyone; prompts for Admin password if no active session) */}
+            <Route path="/admin" element={<AdminGateway />} />
+
             {/* Authenticated Users */}
             <Route element={<ProtectedRoute />}>
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/editor/:roomId" element={<EditorWorkspace />} />
               <Route path="/join/:roomId" element={<JoinRoomPage />} />
-
-              {/* Admin (Requires Auth + Admin Role) */}
-              <Route element={<AdminRoute />}>
-                <Route path="/admin" element={<AdminPage />} />
-                {/* <Route path="/admin/users" element={<ManageUsers />} /> */}
-              </Route>
             </Route>
 
             {/* Global Fallback Route */}

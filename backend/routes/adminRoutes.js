@@ -1,5 +1,10 @@
 import express from 'express';
-import { requireAuth, requireAdmin } from '../middleware/authMiddleware.js';
+import { requireAdminSession } from '../middleware/authMiddleware.js';
+import { 
+  adminLogin, 
+  verifySessionEndpoint, 
+  adminLogout 
+} from '../controllers/adminAuthController.js';
 import { 
   getAdminStats, 
   getAllRooms, 
@@ -11,8 +16,13 @@ import {
 
 const router = express.Router();
 
-// Apply BOTH authentication AND admin authorization to every admin route
-router.use(requireAuth, requireAdmin);
+// 1. Dedicated Admin Authentication Endpoints
+router.post('/login', adminLogin);
+router.get('/verify-session', verifySessionEndpoint);
+router.post('/logout', adminLogout);
+
+// 2. Protected Admin Portal APIs (require valid Admin Session)
+router.use(requireAdminSession);
 
 router.get('/stats', getAdminStats);
 router.get('/rooms', getAllRooms);
@@ -22,4 +32,4 @@ router.get('/users', getAllUsers);
 router.delete('/users/:userId', deleteUserAdmin);
 router.post('/users/:userId/subscription', updateSubscription);
 
-export default router;
+export default router;

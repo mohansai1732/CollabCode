@@ -84,3 +84,23 @@ export const requireAdmin = async (req, res, next) => {
     return res.status(500).json({ error: 'Internal server error during authorization' });
   }
 };
+
+// 3. Authorize dedicated Admin session
+export const requireAdminSession = async (req, res, next) => {
+  const { verifyAdminSessionToken } = await import('../controllers/adminAuthController.js');
+  
+  const token = req.headers['x-admin-token'] || 
+    (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : null);
+
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized: Admin session required' });
+  }
+
+  const session = await verifyAdminSessionToken(token);
+  if (!session) {
+    return res.status(403).json({ error: 'Forbidden: Invalid or expired Admin session' });
+  }
+
+  req.adminSession = session;
+  next();
+};
