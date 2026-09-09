@@ -33,7 +33,11 @@ function corsOrigin(origin, callback) {
     .map(u => u.trim().replace(/\/$/, ''))
     .filter(Boolean);
 
-  if (allowedOrigins.length === 0 || allowedOrigins.includes(origin.replace(/\/$/, ''))) {
+  if (
+    allowedOrigins.length === 0 ||
+    allowedOrigins.includes(origin.replace(/\/$/, '')) ||
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+  ) {
     return callback(null, true);
   }
 

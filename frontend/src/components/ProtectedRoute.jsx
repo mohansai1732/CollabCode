@@ -7,7 +7,14 @@ export default function ProtectedRoute() {
 
   // Show a loading state while Clerk initializes session state
   if (!isLoaded) {
-    return null; // Return null instead of a loading screen for better UX
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-zinc-950 text-zinc-400">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+          <p className="text-sm font-medium text-zinc-500 animate-pulse">Authenticating...</p>
+        </div>
+      </div>
+    );
   }
 
   // If not signed in, redirect to home/landing page

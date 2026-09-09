@@ -1,5 +1,4 @@
 import Editor from '@monaco-editor/react';
-import * as monaco from 'monaco-editor';
 import * as Y from 'yjs';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -596,7 +595,7 @@ export default function EditorWorkspace() {
       monacoNs,
       ytext,
       model,
-      new Set(),
+      new Set([editor]),
       provider.awareness
     );
 
@@ -1074,7 +1073,7 @@ export default function EditorWorkspace() {
           <code className="bg-zinc-800 px-2 py-1 rounded text-amber-200 text-sm font-mono tracking-wider font-bold">{roomId}</code>
         </div>
 
-        {room.ownerId == user.id && (
+        {room?.ownerId === user?.id && (
           <>
             <Button
               variant="secondary"

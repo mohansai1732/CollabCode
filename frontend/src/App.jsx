@@ -11,6 +11,7 @@ import AdminPage from "@/pages/admin/AdminPage";
 
 import ProtectedRoute from '@/components/ProtectedRoute';
 import AdminRoute from '@/components/AdminRoute';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 import { setClerkTokenGetter } from '@/services/api';
 
@@ -29,31 +30,33 @@ function AxiosAuthBridge() {
 export default function App() {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-50 antialiased">
-      <BrowserRouter>
-        {/* Placed inside BrowserRouter to maintain clean context execution */}
-        <AxiosAuthBridge />
+      <ErrorBoundary>
+        <BrowserRouter>
+          {/* Placed inside BrowserRouter to maintain clean context execution */}
+          <AxiosAuthBridge />
 
-        <Routes>
-          {/* Public Route */}
-          <Route path="/" element={<LandingPage />} />
+          <Routes>
+            {/* Public Route */}
+            <Route path="/" element={<LandingPage />} />
 
-          {/* Authenticated Users */}
-          <Route element={<ProtectedRoute />}>
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/editor/:roomId" element={<EditorWorkspace />} />
-            <Route path="/join/:roomId" element={<JoinRoomPage />} />
+            {/* Authenticated Users */}
+            <Route element={<ProtectedRoute />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/editor/:roomId" element={<EditorWorkspace />} />
+              <Route path="/join/:roomId" element={<JoinRoomPage />} />
 
-            {/* Admin (Requires Auth + Admin Role) */}
-            <Route element={<AdminRoute />}>
-              <Route path="/admin" element={<AdminPage />} />
-              {/* <Route path="/admin/users" element={<ManageUsers />} /> */}
+              {/* Admin (Requires Auth + Admin Role) */}
+              <Route element={<AdminRoute />}>
+                <Route path="/admin" element={<AdminPage />} />
+                {/* <Route path="/admin/users" element={<ManageUsers />} /> */}
+              </Route>
             </Route>
-          </Route>
 
-          {/* Global Fallback Route */}
-          {/* <Route path="*" element={<Navigate to="/" replace />} /> */}
-        </Routes>
-      </BrowserRouter>
+            {/* Global Fallback Route */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </ErrorBoundary>
     </div>
   );
 }
