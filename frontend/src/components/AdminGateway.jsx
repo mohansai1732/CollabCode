@@ -87,7 +87,7 @@ export default function AdminGateway() {
 
       if (resData?.locked) {
         setIsLocked(true);
-        setRemainingSeconds(resData.remainingSeconds || 3600);
+        setRemainingSeconds(resData.remainingSeconds || 300);
       } else if (typeof resData?.attemptsRemaining === 'number') {
         setAttemptsRemaining(resData.attemptsRemaining);
       }
@@ -162,7 +162,7 @@ export default function AdminGateway() {
               <span>Access Locked (3 Failed Attempts)</span>
             </div>
             <p className="text-zinc-300">
-              Too many failed password attempts. Login has been locked for 1 hour.
+              Too many failed password attempts. Login has been locked for 5 minutes.
             </p>
             <p className="font-mono font-semibold text-amber-400">
               Lockout expires in: {formatCountdown(remainingSeconds)}

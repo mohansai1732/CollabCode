@@ -3,6 +3,9 @@ import { db } from '../config/firebaseAdmin.js';
 import { getClientIp, parseUserAgent, getApproximateLocation } from '../utils/geoAndDevice.js';
 import { sendAdminLoginAlert } from '../services/emailService.js';
 
+// Dedicated Admin lockout duration: exactly 5 minutes (300,000 ms)
+export const ADMIN_LOCKOUT_DURATION_MS = 5 * 60 * 1000;
+
 // In-memory fallback if Firestore is disconnected in non-production environments
 const memoryLockout = {
   failedAttempts: 0,
@@ -146,7 +149,7 @@ export const adminLogin = async (req, res) => {
         if (!isMatch) {
           const nextAttempts = currentAttempts + 1;
           const isNowLocked = nextAttempts >= 3;
-          const newLockedUntil = isNowLocked ? now + 3600000 : null; // 1 hour
+          const newLockedUntil = isNowLocked ? now + ADMIN_LOCKOUT_DURATION_MS : null; // 5 minutes
 
           transaction.set(lockoutRef, {
             failedAttempts: nextAttempts,
@@ -160,7 +163,7 @@ export const adminLogin = async (req, res) => {
             attemptsRemaining: Math.max(0, 3 - nextAttempts),
             isLocked: isNowLocked,
             lockedUntil: newLockedUntil,
-            remainingSeconds: isNowLocked ? 3600 : 0,
+            remainingSeconds: isNowLocked ? Math.ceil(ADMIN_LOCKOUT_DURATION_MS / 1000) : 0,
             failedAttempts: nextAttempts,
           };
         }
@@ -201,14 +204,14 @@ export const adminLogin = async (req, res) => {
       if (!isMatch) {
         memoryLockout.failedAttempts = (memoryLockout.failedAttempts || 0) + 1;
         const isNowLocked = memoryLockout.failedAttempts >= 3;
-        const newLockedUntil = isNowLocked ? now + 3600000 : null;
+        const newLockedUntil = isNowLocked ? now + ADMIN_LOCKOUT_DURATION_MS : null;
         memoryLockout.lockedUntil = newLockedUntil;
         attemptResult = {
           status: 'FAILED',
           attemptsRemaining: Math.max(0, 3 - memoryLockout.failedAttempts),
           isLocked: isNowLocked,
           lockedUntil: newLockedUntil,
-          remainingSeconds: isNowLocked ? 3600 : 0,
+          remainingSeconds: isNowLocked ? Math.ceil(ADMIN_LOCKOUT_DURATION_MS / 1000) : 0,
           failedAttempts: memoryLockout.failedAttempts,
         };
       } else {
@@ -256,7 +259,7 @@ export const adminLogin = async (req, res) => {
 
     if (attemptResult.isLocked) {
       return res.status(429).json({
-        error: 'Too many failed attempts. Admin login is locked for 1 hour.',
+        error: 'Too many failed attempts. Admin login is locked for 5 minutes.',
         locked: true,
         lockedUntil: attemptResult.lockedUntil,
         remainingSeconds: attemptResult.remainingSeconds,
@@ -265,7 +268,7 @@ export const adminLogin = async (req, res) => {
     }
 
     return res.status(401).json({
-      error: `Incorrect Admin password. ${attemptResult.attemptsRemaining} attempt(s) remaining before a 1-hour lockout.`,
+      error: `Incorrect Admin password. ${attemptResult.attemptsRemaining} attempt(s) remaining before a 5-minute lockout.`,
       locked: false,
       attemptsRemaining: attemptResult.attemptsRemaining,
     });

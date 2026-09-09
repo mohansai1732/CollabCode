@@ -56,7 +56,7 @@ export async function sendAdminLoginAlert({
 
   let lockoutNotice = '';
   if (isLocked) {
-    lockoutNotice = '\n*** ALERT: 3 failed attempts reached. Admin portal login is LOCKED for 1 hour. ***\n';
+    lockoutNotice = '\n*** ALERT: 3 failed attempts reached. Admin portal login is LOCKED for 5 minutes. ***\n';
   } else if (status === 'FAILED') {
     lockoutNotice = `\n(Failed attempt ${attemptsCount} of 3 before lockout)\n`;
   }
@@ -82,7 +82,7 @@ export async function sendAdminLoginAlert({
       <div style="padding: 24px;">
         ${isLocked ? `
           <div style="background: #ef444420; border: 1px solid #ef4444; color: #fca5a5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; font-size: 14px;">
-            ⚠️ 3 consecutive failed attempts detected. Admin login is LOCKED for 1 hour.
+            ⚠️ 3 consecutive failed attempts detected. Admin login is LOCKED for 5 minutes.
           </div>
         ` : ''}
         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
