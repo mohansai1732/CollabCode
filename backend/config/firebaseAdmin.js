@@ -1,5 +1,5 @@
 import admin from 'firebase-admin';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 if (!admin.apps.length) {
@@ -10,7 +10,13 @@ if (!admin.apps.length) {
       serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
     } else {
       // Read local JSON file safely in ES Module context
-      const keyPath = resolve('serviceAccountKey.json');
+      let keyPath = resolve('serviceAccountKey.json');
+      if (!existsSync(keyPath)) {
+        const fallbackPath = resolve(import.meta.dirname, '..', 'serviceAccountKey.json');
+        if (existsSync(fallbackPath)) {
+          keyPath = fallbackPath;
+        }
+      }
       serviceAccount = JSON.parse(readFileSync(keyPath, 'utf8'));
     }
 

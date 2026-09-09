@@ -57,17 +57,13 @@ export const requireAdmin = async (req, res, next) => {
       }
     }
 
-    // 4. Fallback: Check Firestore users collection for role or admin flags
+    // 3. Fallback: Check Firestore users collection for role or admin flags
     if (!role && db) {
       try {
         const userDoc = await db.collection('users').doc(auth.userId).get();
         if (userDoc.exists) {
           const udata = userDoc.data() || {};
-          if (
-            udata.role === 'admin' || 
-            udata.isAdmin === true ||
-            udata.subscription?.invoice?.amount === '$0.00 (Admin Trial)'
-          ) {
+          if (udata.role === 'admin' || udata.isAdmin === true) {
             role = 'admin';
           }
         }

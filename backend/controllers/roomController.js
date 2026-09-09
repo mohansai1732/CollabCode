@@ -78,7 +78,9 @@ function audit(action, actorId, targetId, roomId) { console.info(JSON.stringify(
 
 export async function recalculateEditAccess(roomRef, room, transaction) {
   const owner = await transaction.get(db.collection('users').doc(room.ownerId));
-  const isOwnerPro = isProUser(owner.data());
+  const ownerData = owner.data() || {};
+  const isOwnerAdmin = ownerData.role === 'admin' || ownerData.isAdmin === true;
+  const isOwnerPro = isOwnerAdmin || isProUser(ownerData);
   const limit = isOwnerPro ? TIERS.pro.maxParticipants : TIERS.free.maxParticipants;
   const collaborators = normalizeCollaborators(room.collaborators).sort((a, b) => (a.joinedAt?.toMillis?.() || 0) - (b.joinedAt?.toMillis?.() || 0));
   // The owner is an editor; earliest joined collaborators receive remaining slots.
@@ -163,9 +165,10 @@ export async function createRoom(req, res, next) {
     const userRef = db.collection('users').doc(userId);
     const userDoc = await userRef.get();
     const userData = userDoc.exists ? userDoc.data() : {};
-    const isPro = isProUser(userData);
+    const isAdminUser = userData.role === 'admin' || userData.isAdmin === true;
+    const isPro = isAdminUser || isProUser(userData);
 
-    if (!isPro) {
+    if (!isPro && !isAdminUser) {
       const owned = await countCreatedRooms(userId, userData);
       if (owned >= TIERS.free.rooms) {
         return res.status(403).json({
@@ -178,9 +181,10 @@ export async function createRoom(req, res, next) {
     await db.runTransaction(async transaction => {
       const latestUserDoc = await transaction.get(userRef);
       const latestData = latestUserDoc.exists ? latestUserDoc.data() : {};
-      const latestIsPro = isProUser(latestData);
+      const latestIsAdmin = latestData.role === 'admin' || latestData.isAdmin === true;
+      const latestIsPro = latestIsAdmin || isProUser(latestData);
 
-      if (!latestIsPro) {
+      if (!latestIsPro && !latestIsAdmin) {
         const owned = await countCreatedRooms(userId, latestData);
         if (owned >= TIERS.free.rooms) {
           const error = new Error('Free plan allows a maximum of 10 created rooms. Upgrade to Pro for unlimited rooms.');

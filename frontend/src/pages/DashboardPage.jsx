@@ -2,7 +2,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 
-import { Code2, Plus, Users, Clock, LogOut, Home, FolderCode, TrendingUp, Activity, Trash2, Crown, FileText, CheckCircle2 } from 'lucide-react';
+import { Code2, Plus, Users, Clock, LogOut, Home, FolderCode, TrendingUp, Activity, Trash2, Crown, FileText, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useUser, useClerk, UserButton } from '@clerk/clerk-react';
 import { fetchUserRooms, createRoom, deleteRoom, fetchRoomRequests, fetchRoomById, fetchMyRequests, cancelJoinRequest, createJoinRequest, upgradeSubscription, cancelSubscription, exitOrDeleteRoom, leaveRoom } from '../services/roomsApi';
@@ -32,7 +32,7 @@ export default function DashboardPage() {
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
 
   const isAdmin = user?.publicMetadata?.role === 'admin';
-  const isPro = (subscription?.tier === 'pro' || subscription?.plan === 'pro') && subscription?.status === 'active';
+  const isPro = isAdmin || ((subscription?.tier === 'pro' || subscription?.plan === 'pro') && subscription?.status === 'active');
 
   useEffect(() => {
     if (!user?.id) return;
@@ -270,11 +270,23 @@ export default function DashboardPage() {
                 </span>
               )}
             </button>
+
+            {isAdmin && (
+              <Link
+                to="/admin"
+                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-all font-medium border border-red-500/20"
+              >
+                <ShieldAlert className="w-5 h-5 text-red-400" />
+                <span>Admin Portal</span>
+              </Link>
+            )}
           </nav>
 
           <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-zinc-800">
             <div className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all ${
-              isPro 
+              isAdmin
+                ? 'bg-red-950/40 border border-red-500/30 text-white shadow-[0_0_15px_rgba(239,68,68,0.15)]'
+                : isPro 
                 ? 'bg-purple-950/60 border border-purple-500/30 text-white shadow-[0_0_15px_rgba(168,85,247,0.15)]' 
                 : 'px-2 py-1'
             }`}>
@@ -282,11 +294,15 @@ export default function DashboardPage() {
               <div className="flex-1 text-left min-w-0">
                 <div className="flex items-center gap-1.5">
                   <p className="text-white text-sm truncate font-medium"> {user?.fullName} </p>
-                  {isPro && (
+                  {isAdmin ? (
+                    <span className="text-[10px] bg-red-500/20 text-red-300 border border-red-500/30 px-1.5 py-0.5 rounded font-semibold tracking-wide">
+                      ADMIN
+                    </span>
+                  ) : isPro ? (
                     <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded font-semibold tracking-wide">
                       PRO
                     </span>
-                  )}
+                  ) : null}
                 </div>
                 <p className="text-zinc-400 text-xs truncate"> {user?.primaryEmailAddress?.emailAddress} </p>
               </div>
@@ -304,7 +320,17 @@ export default function DashboardPage() {
               </div>
 
               <div className="flex flex-wrap items-center gap-3 sm:justify-end">
-                {isPro ? (
+                {isAdmin ? (
+                  <Link to="/admin">
+                    <Button
+                      variant="outline"
+                      className="shrink-0 border-red-500/40 text-red-300 hover:text-white hover:bg-red-950/40 font-medium"
+                    >
+                      <ShieldAlert className="h-4 w-4 text-red-400" />
+                      Admin Portal
+                    </Button>
+                  </Link>
+                ) : isPro ? (
                   <Button
                     variant="outline"
                     onClick={() => { setActionError(''); setIsInvoiceModalOpen(true); }}
