@@ -35,7 +35,21 @@ export async function listFiles(req, res, next) {
       return res.status(400).json({ message: 'roomId query parameter is required.' });
     }
 
-    const roomDoc = await db.collection('rooms').doc(roomId).get();
+    let roomDoc = await db.collection('rooms').doc(roomId).get();
+    let actualRoomId = roomId;
+    if (!roomDoc.exists) {
+      const upper = roomId.toUpperCase();
+      const lower = roomId.toLowerCase();
+      if (roomId !== upper) {
+        const uDoc = await db.collection('rooms').doc(upper).get();
+        if (uDoc.exists) { roomDoc = uDoc; actualRoomId = upper; }
+      }
+      if (!roomDoc.exists && roomId !== lower) {
+        const lDoc = await db.collection('rooms').doc(lower).get();
+        if (lDoc.exists) { roomDoc = lDoc; actualRoomId = lower; }
+      }
+    }
+
     if (!roomDoc.exists) {
       return res.status(404).json({ message: 'Room not found.' });
     }
@@ -44,7 +58,7 @@ export async function listFiles(req, res, next) {
       return res.status(403).json({ message: 'You are not a member of this room.' });
     }
 
-    const snapshot = await db.collection('files').where('roomId', '==', roomId).get();
+    const snapshot = await db.collection('files').where('roomId', '==', actualRoomId).get();
 
     if (snapshot.empty) {
       // Create initial default file for room if none exist

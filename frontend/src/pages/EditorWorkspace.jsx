@@ -178,49 +178,65 @@ export default function EditorWorkspace() {
     let active = true;
 
     const checkAccess = async () => {
-      try {
-        const roomData = await fetchRoomById(roomId, user.id);
+      // Retry up to 3 times with backoff if room is not immediately found right after creation
+      let roomData = null;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
         if (!active) return;
-
-        if (!roomData) {
-          setRoom(null);
-          setCheckingAccess(false);
-          return;
-        }
-
-        setRoom(roomData);
-
-        const isCollaborator = roomData.ownerId === user.id ||
-          roomData.collaborators?.some(collaborator =>
-            (typeof collaborator === 'string' ? collaborator : collaborator.userId) === user.id
-          );
-
-        if (isCollaborator) {
-          setHasAccess(true);
-          setCheckingAccess(false);
-          const myCollab = roomData.collaborators?.find(c =>
-            (typeof c === 'string' ? c : c.userId) === user.id
-          );
-          if (myCollab && typeof myCollab === 'object' && myCollab.muted === true) {
-            setIsMuted(true);
-          } else {
-            setIsMuted(false);
+        try {
+          roomData = await fetchRoomById(roomId, user.id);
+          if (roomData) break;
+        } catch (err) {
+          // If 403 returned, room exists and user requires join approval
+          if (err?.response?.status === 403 && err?.response?.data?.room) {
+            roomData = err.response.data.room;
+            break;
           }
+          if (attempt < 3) {
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+          }
+        }
+      }
+
+      if (!active) return;
+
+      if (!roomData) {
+        setRoom(null);
+        setCheckingAccess(false);
+        return;
+      }
+
+      setRoom(roomData);
+
+      const isCollaborator = roomData.ownerId === user.id ||
+        roomData.collaborators?.some(collaborator =>
+          (typeof collaborator === 'string' ? collaborator : collaborator.userId) === user.id
+        );
+
+      if (isCollaborator) {
+        setHasAccess(true);
+        setCheckingAccess(false);
+        const myCollab = roomData.collaborators?.find(c =>
+          (typeof c === 'string' ? c : c.userId) === user.id
+        );
+        if (myCollab && typeof myCollab === 'object' && myCollab.muted === true) {
+          setIsMuted(true);
         } else {
-          // Fetch user's requests
+          setIsMuted(false);
+        }
+      } else {
+        // Fetch user's requests safely
+        try {
           const myRequests = await fetchMyRequests(user.id);
           if (!active) return;
 
           const pendingReq = myRequests.find(r => r.roomId === roomId && r.status === 'pending');
           setMyRequest(pendingReq || null);
-          setHasAccess(false);
-          setCheckingAccess(false);
+        } catch (reqErr) {
+          console.warn('Failed to fetch pending requests:', reqErr);
         }
-      } catch (err) {
-        console.error('Access check failed:', err);
-        if (active) {
-          setCheckingAccess(false);
-        }
+        setHasAccess(false);
+        setCheckingAccess(false);
       }
     };
 
@@ -975,11 +991,16 @@ export default function EditorWorkspace() {
           <p className="text-zinc-400 mb-6">
             The room code may be incorrect, or the room may have been deleted.
           </p>
-          <Link to="/dashboard" className="w-full block">
-            <Button variant="primary" className="w-full">
-              Back to Dashboard
+          <div className="flex flex-col gap-3">
+            <Button variant="outline" className="w-full" onClick={() => window.location.reload()}>
+              Retry Connection
             </Button>
-          </Link>
+            <Link to="/dashboard" className="w-full block">
+              <Button variant="primary" className="w-full">
+                Back to Dashboard
+              </Button>
+            </Link>
+          </div>
         </Card>
       </div>
     );

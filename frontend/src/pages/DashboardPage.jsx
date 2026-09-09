@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 
@@ -9,6 +9,7 @@ import { fetchUserRooms, createRoom, deleteRoom, fetchRoomRequests, fetchRoomByI
 
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('rooms');
   const { user, isLoaded: isUserLoaded } = useUser();
   const { signOut } = useClerk();
@@ -78,14 +79,20 @@ export default function DashboardPage() {
 
   const handleCreateRoomSubmit = async (e) => {
     e.preventDefault();
-    if (!roomInputValue?.trim()) return;
+    const name = roomInputValue?.trim();
+    if (!name) return;
     try {
       setActionError('');
-      const { roomId } = await createRoom(user.id, roomInputValue, user.fullName);
-      window.location.href = `/editor/${roomId}`;
+      const res = await createRoom(user.id, name, user.fullName);
+      const targetId = res?.roomId || res?.id || res?.room?.id;
+      if (!targetId) {
+        throw new Error('Room created, but failed to retrieve room ID.');
+      }
+      setIsCreateModalOpen(false);
+      navigate(`/editor/${targetId}`);
     } catch (err) {
-      console.error(err);
-      setActionError(err?.response?.data?.message || 'Failed to create room. Please try again.');
+      console.error('Create room error:', err);
+      setActionError(err?.response?.data?.message || err?.message || 'Failed to create room. Please try again.');
     }
   };
 

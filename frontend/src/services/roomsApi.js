@@ -6,8 +6,14 @@ export const fetchUserRooms = async (userId, userName) => {
 };
 
 export const createRoom = async (userId, name, ownerName) => {
-  const { data } = await api.post('/rooms', { userId, name, ownerName});
-  return data;
+  const { data } = await api.post('/rooms', { userId, name, ownerName });
+  const id = data?.roomId || data?.id || data?.room?.id || data?.room?.roomId;
+  return {
+    ...data,
+    roomId: id,
+    id: id,
+    room: data?.room || { id, name: data?.name || name }
+  };
 };
 
 export const deleteRoom = async (roomId, userId) => {
@@ -16,8 +22,11 @@ export const deleteRoom = async (roomId, userId) => {
 };
 
 export const fetchRoomById = async (roomId, userId) => {
+  if (!roomId || roomId === 'undefined' || roomId === 'null') {
+    throw new Error('Invalid room ID provided');
+  }
   const { data } = await api.get(`/rooms/find/${roomId}`, { params: { userId } });
-  return data.room;
+  return data?.room || data;
 };
 
 export const createJoinRequest = async (arg1, arg2) => {
@@ -38,13 +47,27 @@ export const createJoinRequest = async (arg1, arg2) => {
 };
 
 export const fetchRoomRequests = async (roomId, userId) => {
-  const { data } = await api.get(`/rooms/${roomId}/requests`, { params: { userId } });
-  return (data.requests || []).map(request => ({ ...request, roomId }));
+  try {
+    const { data } = await api.get(`/rooms/${roomId}/requests`, { params: { userId } });
+    return (data?.requests || []).map(request => ({ ...request, roomId }));
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return [];
+    }
+    throw err;
+  }
 };
 
 export const fetchMyRequests = async (userId) => {
-  const { data } = await api.get(`/rooms/my-requests/${userId}`);
-  return data.requests || [];
+  try {
+    const { data } = await api.get(`/rooms/my-requests/${userId}`);
+    return data?.requests || [];
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return [];
+    }
+    throw err;
+  }
 };
 
 export const cancelJoinRequest = async (requestId, userId) => {

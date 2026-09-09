@@ -205,15 +205,30 @@ export async function createRoom(req, res, next) {
       }, { merge: true });
     });
     audit('room.create', userId, null, roomId);
-    res.status(201).json({ roomId, name });
+    res.status(201).json({ roomId, id: roomId, name, room: { id: roomId, roomId, name } });
   } catch (error) { next(error); }
 }
 
 export async function getRoomById(req, res, next) {
   try {
-    const roomId = req.params.roomId;
-    if (!validId(roomId)) return res.status(400).json({ message: 'Invalid room ID.' });
-    const doc = await db.collection('rooms').doc(roomId).get();
+    const rawId = req.params.roomId;
+    if (!validId(rawId)) return res.status(400).json({ message: 'Invalid room ID.' });
+    
+    let doc = await db.collection('rooms').doc(rawId).get();
+    if (!doc.exists) {
+      // Fallback: check uppercase / lowercase in case of casing mismatch
+      const upper = rawId.toUpperCase();
+      const lower = rawId.toLowerCase();
+      if (rawId !== upper) {
+        const uDoc = await db.collection('rooms').doc(upper).get();
+        if (uDoc.exists) doc = uDoc;
+      }
+      if (!doc.exists && rawId !== lower) {
+        const lDoc = await db.collection('rooms').doc(lower).get();
+        if (lDoc.exists) doc = lDoc;
+      }
+    }
+
     if (!doc.exists) return res.status(404).json({ message: 'Room not found.' });
     const userId = req.userId;
     if (!requireUserId(userId, res)) return;
@@ -550,9 +565,22 @@ export async function leaveRoom(req, res, next) {
 // Fetch basic metadata for invite links / validation
 export const getRoomInviteInfo = async (req, res) => {
   try {
-    const { roomId } = req.params;
-    const roomRef = db.collection('rooms').doc(roomId);
-    const snap = await roomRef.get();
+    const rawId = req.params.roomId;
+    let roomRef = db.collection('rooms').doc(rawId);
+    let snap = await roomRef.get();
+
+    if (!snap.exists) {
+      const upper = rawId.toUpperCase();
+      const lower = rawId.toLowerCase();
+      if (rawId !== upper) {
+        const uSnap = await db.collection('rooms').doc(upper).get();
+        if (uSnap.exists) snap = uSnap;
+      }
+      if (!snap.exists && rawId !== lower) {
+        const lSnap = await db.collection('rooms').doc(lower).get();
+        if (lSnap.exists) snap = lSnap;
+      }
+    }
 
     if (!snap.exists) {
       return res.status(404).json({ message: 'Room not found' });
