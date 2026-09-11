@@ -18,7 +18,7 @@ function spaFallbackPlugin() {
       fs.writeFileSync(path.join(distDir, '404.html'), html);
 
       // 2. Direct static entry points for known static routes so they return 200 OK
-      const staticRoutes = ['dashboard', 'login', 'register', 'admin', 'sign-in', 'sign-up'];
+      const staticRoutes = ['dashboard', 'login', 'register', 'sign-in', 'sign-up'];
       for (const route of staticRoutes) {
         const routeDir = path.join(distDir, route);
         if (!fs.existsSync(routeDir)) {
@@ -32,6 +32,13 @@ function spaFallbackPlugin() {
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), spaFallbackPlugin()],
+  server: {
+    port: 5173,
+    host: true,
+  },
+  preview: {
+    port: 5173,
+  },
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),

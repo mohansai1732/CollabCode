@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     iptables \
     iproute2 \
+    procps \
     util-linux \
     dumb-init \
     && rm -rf /var/lib/apt/lists/*

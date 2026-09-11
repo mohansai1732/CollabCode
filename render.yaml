@@ -1,0 +1,82 @@
+services:
+  # ================================================================
+  # 1. CollabCode Backend API & Collaboration Engine
+  # ================================================================
+  - type: web
+    name: collabcode-backend
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5001
+      - key: JSON_LIMIT
+        value: 4mb
+      - key: CLIENT_URL
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: SANDBOX_SERVICE_URL
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+
+  # ================================================================
+  # 2. CollabCode Isolated Code Execution Sandbox
+  # ================================================================
+  - type: web
+    name: collabcode-sandbox
+    runtime: docker
+    rootDir: sandbox
+    dockerfilePath: Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 2000
+      - key: NODE_ENV
+        value: production
+      - key: SANDBOX_API_SECRET
+        sync: false
+
+  # ================================================================
+  # 3. CollabCode Frontend (Single Page Application)
+  # ================================================================
+  - type: static
+    name: collabcode-frontend
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      # SPA Rewrite: Ensures deep routes (/editor/:id, /join/:id) return index.html with HTTP 200
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+      - key: VITE_SOCKET_URL
+        sync: false
+      - key: VITE_CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: VITE_FIREBASE_API_KEY
+        sync: false
+      - key: VITE_FIREBASE_AUTH_DOMAIN
+        sync: false
+      - key: VITE_FIREBASE_PROJECT_ID
+        sync: false
+      - key: VITE_FIREBASE_STORAGE_BUCKET
+        sync: false
+      - key: VITE_FIREBASE_MESSAGING_SENDER_ID
+        sync: false
+      - key: VITE_FIREBASE_APP_ID
+        sync: false
+

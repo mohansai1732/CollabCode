@@ -45,29 +45,6 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    if (clerkUserGetter && config.url && config.url.includes('/admin')) {
-      try {
-        const user = typeof clerkUserGetter === 'function' ? clerkUserGetter() : clerkUserGetter;
-        if (user?.publicMetadata?.role) {
-          config.headers['X-Admin-Role'] = user.publicMetadata.role;
-        }
-      } catch (e) {
-        // ignore
-      }
-    }
-
-    // Attach dedicated Admin session token for admin requests
-    if (config.url && config.url.includes('/admin')) {
-      try {
-        const adminToken = typeof window !== 'undefined' ? sessionStorage.getItem('collabcode_admin_session_token') : null;
-        if (adminToken) {
-          config.headers['X-Admin-Token'] = adminToken;
-        }
-      } catch (e) {
-        // ignore
-      }
-    }
-
     return config;
   },
   (error) => Promise.reject(error)

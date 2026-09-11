@@ -7,7 +7,6 @@ import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import routes from './routes/index.js';
-import adminRoutes from './routes/adminRoutes.js';
 import { clerkMiddleware } from '@clerk/express';
 import { Server } from 'socket.io';
 import { YSocketIO } from 'y-socket.io/dist/server';
@@ -52,7 +51,7 @@ app.use(
     origin: corsOrigin,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Role', 'X-Admin-Token'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   }),
 );
 
@@ -85,7 +84,6 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use('/api/admin', adminRoutes);
 app.use('/api', routes);
 
 // Serve frontend static assets and SPA fallback in production if frontend/dist exists
@@ -193,7 +191,7 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 5001;
 
 server.listen(PORT, () => {
   console.log(`API server running on port ${PORT}`);

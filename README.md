@@ -37,4 +37,3 @@ Designed for technical recruitment, CollabCode includes features to ensure authe
 *   **Styling:** Tailwind CSS / Modern CSS
 
 
-phase 1

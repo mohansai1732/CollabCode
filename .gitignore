@@ -5,11 +5,15 @@ node_modules/
 .env
 frontend/.env
 backend/.env
+collabcode-admin/.env
+collabcode-admin-backend/.env
 backend/serviceAccountKey.json
+collabcode-admin-backend/serviceAccountKey.json
 
 # Build folders
 dist/
 build/
+collabcode-admin/dist/
 
 # Logs
 *.log

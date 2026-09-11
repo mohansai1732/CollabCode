@@ -8,8 +8,6 @@ import EditorWorkspace from '@/pages/EditorWorkspace';
 import JoinRoomPage from './pages/JoinRoomPage';
 import AuthPage from '@/pages/AuthPage';
 
-import AdminGateway from "@/components/AdminGateway";
-
 import ProtectedRoute from '@/components/ProtectedRoute';
 import ErrorBoundary from '@/components/ErrorBoundary';
 
@@ -44,9 +42,6 @@ export default function App() {
             <Route path="/register/*" element={<AuthPage mode="sign-up" />} />
             <Route path="/register" element={<AuthPage mode="sign-up" />} />
             <Route path="/sign-up/*" element={<AuthPage mode="sign-up" />} />
-
-            {/* Admin Gateway (Accessible to anyone; prompts for Admin password if no active session) */}
-            <Route path="/admin" element={<AdminGateway />} />
 
             {/* Authenticated Users */}
             <Route element={<ProtectedRoute />}>

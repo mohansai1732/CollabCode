@@ -1,27 +1,51 @@
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
 
 const MAX_OUTPUT_BYTES = 64 * 1024; // 64 KB max output
 const DEFAULT_TIMEOUT_MS = 5000;    // 5 seconds max execution
 const IS_WINDOWS = process.platform === 'win32';
 
-/**
- * Checks if a command exists in PATH (synchronous check cache or basic probe)
- */
-let hasUnshare = false;
 let hasSandboxUser = false;
 
 // Determine sandbox execution environment at startup
 try {
   if (!IS_WINDOWS && process.getuid && process.getuid() === 0) {
     hasSandboxUser = true; // In Docker container running as root, we can drop to sandbox_user
-    hasUnshare = true;
   }
 } catch (e) {
   // Ignore
+}
+
+/**
+ * Safely terminates a process and all its child/grandchild processes
+ * scoped ONLY to the given child's process tree.
+ */
+function terminateProcessTree(child, pid) {
+  if (!pid) return;
+
+  if (IS_WINDOWS) {
+    try {
+      execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore' });
+    } catch (e) {
+      try { child.kill('SIGKILL'); } catch (err) {}
+    }
+  } else {
+    // 1. Try sending SIGKILL to the process group if detached
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch (e) {
+      // If process group kill fails, kill the direct process
+      try { child.kill('SIGKILL'); } catch (err) {}
+    }
+
+    // 2. Also query any direct children of this PID and kill them explicitly
+    try {
+      execSync(`pkill -9 -P ${pid} 2>/dev/null || true`, { stdio: 'ignore' });
+    } catch (e) {}
+  }
 }
 
 /**
@@ -34,6 +58,9 @@ function runProcess({ command, args, cwd, stdin = '', timeoutMs = DEFAULT_TIMEOU
     let stderr = '';
     let killedDueToTimeout = false;
     let killedDueToOutputLimit = false;
+    let settled = false;
+    let timer = null;
+    let forceKillTimer = null;
 
     let finalCommand = command;
     let finalArgs = args;
@@ -49,6 +76,7 @@ function runProcess({ command, args, cwd, stdin = '', timeoutMs = DEFAULT_TIMEOU
     try {
       child = spawn(finalCommand, finalArgs, {
         cwd,
+        detached: !IS_WINDOWS, // Create independent process group for the execution tree on POSIX
         env: {
           PATH: process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
           LANG: 'en_US.UTF-8',
@@ -67,18 +95,38 @@ function runProcess({ command, args, cwd, stdin = '', timeoutMs = DEFAULT_TIMEOU
       });
     }
 
+    const pid = child.pid;
+
+    // Unified single-settlement function
+    function safeResolve(result) {
+      if (settled) return;
+      settled = true;
+
+      if (timer) clearTimeout(timer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+
+      // Force-close stdio streams to prevent hanging pipes
+      try { child.stdout?.destroy(); } catch (e) {}
+      try { child.stderr?.destroy(); } catch (e) {}
+      try { child.stdin?.destroy(); } catch (e) {}
+
+      resolve(result);
+    }
+
     // Safety timeout
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       killedDueToTimeout = true;
-      try {
-        child.kill('SIGKILL');
-      } catch (e) {}
-      // Ensure all processes spawned by sandbox_user are killed
-      if (!IS_WINDOWS && runAsSandboxUser && hasSandboxUser) {
-        try {
-          spawn('pkill', ['-9', '-u', 'sandbox_user']);
-        } catch (e) {}
-      }
+      terminateProcessTree(child, pid);
+
+      // Safety net: if streams or close event do not settle within 800ms, force-resolve
+      forceKillTimer = setTimeout(() => {
+        safeResolve({
+          stdout,
+          stderr: (stderr ? stderr + '\n' : '') + `Execution Timed Out (Limit: ${timeoutMs / 1000}s)`,
+          exitCode: 124,
+          executionTimeMs: Date.now() - startTime
+        });
+      }, 800);
     }, timeoutMs);
 
     // Stream stdin if provided
@@ -90,7 +138,7 @@ function runProcess({ command, args, cwd, stdin = '', timeoutMs = DEFAULT_TIMEOU
         // Child might have exited immediately
       }
     } else if (child.stdin) {
-      child.stdin.end();
+      try { child.stdin.end(); } catch (e) {}
     }
 
     child.stdout.on('data', (data) => {
@@ -99,7 +147,7 @@ function runProcess({ command, args, cwd, stdin = '', timeoutMs = DEFAULT_TIMEOU
         if (stdout.length >= MAX_OUTPUT_BYTES) {
           stdout += '\n[Output truncated: Limit 64KB reached]';
           killedDueToOutputLimit = true;
-          child.kill('SIGKILL');
+          terminateProcessTree(child, pid);
         }
       }
     });
@@ -110,14 +158,14 @@ function runProcess({ command, args, cwd, stdin = '', timeoutMs = DEFAULT_TIMEOU
         if (stderr.length >= MAX_OUTPUT_BYTES) {
           stderr += '\n[Error output truncated: Limit 64KB reached]';
           killedDueToOutputLimit = true;
-          child.kill('SIGKILL');
+          terminateProcessTree(child, pid);
         }
       }
     });
 
     child.on('error', (err) => {
-      clearTimeout(timer);
-      resolve({
+      terminateProcessTree(child, pid);
+      safeResolve({
         stdout,
         stderr: stderr || err.message,
         exitCode: 1,
@@ -126,11 +174,10 @@ function runProcess({ command, args, cwd, stdin = '', timeoutMs = DEFAULT_TIMEOU
     });
 
     child.on('close', (code, signal) => {
-      clearTimeout(timer);
       const executionTimeMs = Date.now() - startTime;
 
       if (killedDueToTimeout) {
-        return resolve({
+        return safeResolve({
           stdout,
           stderr: (stderr ? stderr + '\n' : '') + `Execution Timed Out (Limit: ${timeoutMs / 1000}s)`,
           exitCode: 124,
@@ -139,7 +186,7 @@ function runProcess({ command, args, cwd, stdin = '', timeoutMs = DEFAULT_TIMEOU
       }
 
       if (killedDueToOutputLimit) {
-        return resolve({
+        return safeResolve({
           stdout,
           stderr: (stderr ? stderr + '\n' : '') + 'Process killed: output buffer exceeded 64KB limit',
           exitCode: 137,
@@ -147,7 +194,7 @@ function runProcess({ command, args, cwd, stdin = '', timeoutMs = DEFAULT_TIMEOU
         });
       }
 
-      resolve({
+      safeResolve({
         stdout,
         stderr,
         exitCode: code ?? (signal ? 1 : 0),
@@ -187,7 +234,7 @@ export async function executeCode({ language, code, stdin = '', timeoutMs = DEFA
         // Compile
         const compile = await runProcess({
           command: 'gcc',
-          args: ['-O2', '-Wall', 'main.c', '-o', IS_WINDOWS ? 'main.exe' : 'main'],
+          args: ['-O0', '-Wall', 'main.c', '-o', IS_WINDOWS ? 'main.exe' : 'main'],
           cwd: runDir,
           timeoutMs: 10000,
           runAsSandboxUser: false // Compile as normal user
@@ -225,7 +272,7 @@ export async function executeCode({ language, code, stdin = '', timeoutMs = DEFA
         // Compile
         const compile = await runProcess({
           command: 'g++',
-          args: ['-O2', '-std=c++17', '-Wall', 'main.cpp', '-o', IS_WINDOWS ? 'main.exe' : 'main'],
+          args: ['-O0', '-std=c++17', '-Wall', 'main.cpp', '-o', IS_WINDOWS ? 'main.exe' : 'main'],
           cwd: runDir,
           timeoutMs: 10000,
           runAsSandboxUser: false
@@ -286,7 +333,7 @@ export async function executeCode({ language, code, stdin = '', timeoutMs = DEFA
         // Execute Java class
         const exec = await runProcess({
           command: 'java',
-          args: ['-Xmx256m', '-Xss8m', className],
+          args: ['-Xms16m', '-Xmx256m', '-Xss8m', className],
           cwd: runDir,
           stdin,
           timeoutMs,
